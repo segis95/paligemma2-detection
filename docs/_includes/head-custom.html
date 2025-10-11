@@ -1,0 +1,34 @@
+<script>
+MathJax = {
+  tex: {
+    inlineMath: [['$', '$'], ['\\(', '\\)']],
+    displayMath: [['$$', '$$'], ['\\[', '\\]']],
+    processEscapes: true
+  }
+};
+</script>
+
+<script type="text/javascript" id="MathJax-script" async
+  src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js">
+</script>
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+  // Convert kramdown's script tags to MathJax delimiters
+  var mathElements = document.querySelectorAll('script[type^="math/tex"]');
+  
+  mathElements.forEach(function(el) {
+    var isDisplay = el.type.indexOf('mode=display') !== -1;
+    var texText = el.textContent || el.innerText;
+    texText = texText.replace(/<!\[CDATA\[|\]\]>/g, '');
+    
+    var span = document.createElement(isDisplay ? 'div' : 'span');
+    span.innerHTML = (isDisplay ? '\\[' : '\\(') + texText + (isDisplay ? '\\]' : '\\)');
+    el.parentNode.replaceChild(span, el);
+  });
+  
+  if (window.MathJax) {
+    MathJax.typesetPromise();
+  }
+});
+</script>
