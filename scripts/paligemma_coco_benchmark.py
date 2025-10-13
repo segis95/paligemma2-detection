@@ -2,6 +2,7 @@ import json
 import re
 from pathlib import Path
 import traceback
+import os
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,15 +15,20 @@ from transformers import (
     PaliGemmaForConditionalGeneration,
     PaliGemmaProcessor,
 )
+from accelerate import PartialState
 
-# Local/Ultralytics imports
 from ultralytics.data.converter import coco80_to_coco91_class
 from ultralytics.utils.ops import xyxy2ltwh
 from ultralytics.utils.plotting import Annotator
+from pycocotools.coco import COCO
+from pycocotools.cocoeval import COCOeval
 
 
 class PaliGemmaCocoPredictor:
-    def __init__(self, model, processor,
+    def __init__(self,
+                 model,
+                 processor,
+                 distributed_state: PartialState,
                  max_new_tokens=256,
                  do_sample=False,
                  classes_per_call=5,
@@ -33,6 +39,7 @@ class PaliGemmaCocoPredictor:
                  ):
         self.model = model
         self.processor = processor
+        self.distributed_state = distributed_state
         self.max_new_tokens = max_new_tokens
         self.do_sample = do_sample
         self.classes_per_call = classes_per_call
@@ -177,7 +184,7 @@ class PaliGemmaCocoPredictor:
                                       truncation=False,
                                       padding='longest' if not self.max_input_length else 'max_length',
                                       max_length=self.max_input_length,
-                                      ).to(torch.bfloat16).to(self.model.device)
+                                      ).to(torch.bfloat16).to(self.distributed_state.device)
 
         input_len = model_inputs["input_ids"].shape[-1]
 
@@ -239,7 +246,31 @@ class PaliGemmaCocoPredictor:
 
         return [r for r in results if r[-2] in self.coco_class2id]
 
-    def process_directory(self, path_to_images, json_annotations, predictions_filename="my_predictions.json"):
+    def _extract_detection_results_in_benchmark_format(self, predictions, image_id):
+
+        if not predictions:
+            return []
+
+        results = []
+        cat_ids = [coco80_to_coco91_class()[self.coco_class2id[x[4]]] for x in predictions]
+        boxes = xyxy2ltwh(np.array([[x[1], x[0], x[3], x[2]] for x in predictions]))
+        scores = [x[-1] for x in predictions]
+
+        for bbox, cat, score in zip(boxes, cat_ids, scores):
+            results.append(
+                {
+                    'image_id': image_id,
+                    'file_name': f'{image_id:012d}.jpg',
+                    'category_id': cat,
+                    'bbox': bbox.tolist(),
+                    'score': score
+                }
+            )
+
+        return results
+
+    @staticmethod
+    def _parse_valid_image_ids(json_annotations):
 
         with open(json_annotations, 'r') as f:
             data = json.load(f)
@@ -252,60 +283,100 @@ class PaliGemmaCocoPredictor:
             item = {x: item[x] for x in {'image_id', 'bbox', 'category_id'}}
             i2gt[item['image_id']].append(item)
 
+        return sorted(i2gt.keys())
+
+    def process_directory(self,
+                          path_to_images,
+                          json_annotations,
+                          predictions_folder=Path('predictions'),
+                          predictions_filename="all_predictions.json"
+                          ):
+
         my_predictions = []
         failed_images = []
-        for image_id in tqdm(i2gt):
-            try:
-                path_to_image = path_to_images / f'{image_id:012d}.jpg'
-                original_image = Image.open(path_to_image)
+        images_ids_list = PaliGemmaCocoPredictor._parse_valid_image_ids(json_annotations)
 
-                results = pg_predictor.detect_coco(original_image)
+        with self.distributed_state.split_between_processes(images_ids_list) as images_ids_rank:
+            for image_id in tqdm(images_ids_rank, disable=not self.distributed_state.is_main_process):
 
-                cat_ids = [coco80_to_coco91_class()[pg_predictor.coco_class2id[x[4]]] for x in results]
-                boxes = xyxy2ltwh(np.array([[x[1], x[0], x[3], x[2]] for x in results]))
-                scores = [x[-1] for x in results]
+                try:
+                    path_to_image = path_to_images / f'{image_id:012d}.jpg'
+                    original_image = Image.open(path_to_image)
+                    results = self.detect_coco(original_image)
+                    my_predictions.extend(self._extract_detection_results_in_benchmark_format(results, image_id))
+                except Exception as e:
+                    print(f"Error processing image id: {image_id}")
+                    failed_images.append(image_id)
+                    traceback.print_exc()
 
-                for bbox, cat, score in zip(boxes, cat_ids, scores):
-                    my_predictions.append(
-                        {
-                            'image_id': image_id,
-                            'file_name': f'{image_id:012d}.jpg',
-                            'category_id': cat,
-                            'bbox': bbox.tolist(),
-                            'score': score
-                        }
-                    )
-            except Exception as e:
-                print(f"Error processing image id: {image_id}")
-                failed_images.append(image_id)
-                traceback.print_exc()
+        self._save_local_predictions_rank(my_predictions, predictions_folder)
 
-        with open(predictions_filename, 'w') as f:
+        print(f"Rank {self.distributed_state.local_process_index} "
+              f"failed to process {len(failed_images)} images: {failed_images}"
+              )
+
+        self.distributed_state.wait_for_everyone()
+
+        if self.distributed_state.is_main_process:
+            self._collect_all_json_and_save(predictions_folder, predictions_filename)
+            PaliGemmaCocoPredictor.calculate_coco_metrics(json_annotations,
+                                                          predictions_folder / predictions_filename)
+
+    def _save_local_predictions_rank(self, my_predictions, predictions_folder):
+        os.makedirs(predictions_folder, exist_ok=True)
+        rank_file_path = predictions_folder / f"predictions_rank_{self.distributed_state.process_index}.json"
+        with open(rank_file_path, 'w') as f:
             json.dump(my_predictions, f)
 
-        print(f"Failed to process {len(failed_images)} images: {failed_images}")
+    def _collect_all_json_and_save(self, predictions_folder, predictions_filename):
+        all_predictions = []
+        for i in range(self.distributed_state.num_processes):
+            with open(predictions_folder / f"predictions_rank_{i}.json", 'r') as f:
+                all_predictions.extend(json.load(f))
+
+        with open(predictions_folder / predictions_filename, 'w') as f:
+            json.dump(all_predictions, f)
+
+    @staticmethod
+    def calculate_coco_metrics(json_annotations, json_predictions):
+        coco_gt = COCO(json_annotations)
+        coco_pred = coco_gt.loadRes(json_predictions)
+        coco_eval = COCOeval(coco_gt, coco_pred, iouType='bbox')
+        coco_eval.evaluate()
+        coco_eval.accumulate()
+        coco_eval.summarize()
 
 
-if __name__ == "__main__":
+def test_detect_coco(paligemma_predictor):
+    original_image = Image.open("/path/to/folder/coco/val2017/000000398742.jpg")
+    print(original_image.size)
+    annotator = Annotator(original_image, line_width=1, font_size=11, pil=True)
+    results = paligemma_predictor.detect_coco(original_image,
+                                              annotator=annotator
+                                              )
+    print(results)
+    result_img = annotator.result()
+    plt.axis('off')
+    plt.gcf().set_size_inches(15, 10)
+    plt.imsave('annotation.jpg', result_img)
+
+
+def main():
+    distributed_state = PartialState()
     model_id = "/path/to/folder/models/paligemma2-10b-mix-448"
     # model_id = "/path/to/folder/models/paligemma2-10b-pt-448"
 
-    # flash attention adds noise to prediction
-    # attn_implementation={
-    #     "text_decoder": "flash_attention_2",
-    #     "vision_encoder": "eager"
-    # }
     model = PaliGemmaForConditionalGeneration.from_pretrained(model_id,
                                                               dtype=torch.bfloat16,
-                                                              device_map="auto",
-                                                              )
-    model = torch.compile(model, dynamic=True)  # dynamic=True optional
+                                                              ).to(distributed_state.device)
+    model = torch.compile(model, dynamic=True)
     model.eval()
 
     processor = PaliGemmaProcessor.from_pretrained(model_id, use_fast=True)
 
     pg_predictor = PaliGemmaCocoPredictor(model,
                                           processor,
+                                          distributed_state,
                                           max_new_tokens=256,
                                           do_sample=False,
                                           classes_per_call=10,
@@ -319,15 +390,8 @@ if __name__ == "__main__":
     json_annotations = Path("/path/to/folder/coco/annotations/annotations/instances_val2017.json")
     pg_predictor.process_directory(path_to_images, json_annotations)
 
-    # Test pg_predictor.detect_coco
-    # original_image = Image.open("/path/to/folder/coco/val2017/000000398742.jpg")
-    # print(original_image.size)
-    # annotator = Annotator(original_image, line_width=1, font_size=11, pil=True)
-    # results = pg_predictor.detect_coco(original_image,
-    #                                    annotator=annotator
-    #                                    )
-    # print(results)
-    # result_img = annotator.result()
-    # plt.axis('off')
-    # plt.gcf().set_size_inches(15, 10)
-    # plt.imsave('annotation.jpg', result_img)
+    # test_detect_coco(pg_predictor)
+
+
+if __name__ == "__main__":
+    main()
