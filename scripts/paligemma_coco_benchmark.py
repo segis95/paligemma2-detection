@@ -1,0 +1,333 @@
+import json
+import re
+from pathlib import Path
+import traceback
+
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+import torch.nn.functional as F
+import yaml
+from PIL import Image
+from tqdm import tqdm
+from transformers import (
+    PaliGemmaForConditionalGeneration,
+    PaliGemmaProcessor,
+)
+
+# Local/Ultralytics imports
+from ultralytics.data.converter import coco80_to_coco91_class
+from ultralytics.utils.ops import xyxy2ltwh
+from ultralytics.utils.plotting import Annotator
+
+
+class PaliGemmaCocoPredictor:
+    def __init__(self, model, processor,
+                 max_new_tokens=256,
+                 do_sample=False,
+                 classes_per_call=5,
+                 batch_size=80,
+                 debug_verbose=False,
+                 normalize_score_for_multi_token_label=True,
+                 max_input_length=None
+                 ):
+        self.model = model
+        self.processor = processor
+        self.max_new_tokens = max_new_tokens
+        self.do_sample = do_sample
+        self.classes_per_call = classes_per_call
+        self.batch_size = batch_size
+        self.verbose = debug_verbose
+        self.normalize_score_for_multi_token_label = normalize_score_for_multi_token_label
+        self.pattern = r'<loc(\d{4})><loc(\d{4})><loc(\d{4})><loc(\d{4})>([^;<]+)'
+        self.loc_tokens_expected_number = 4
+        self.max_new_tokens = 256
+
+        with open('coco_classes2id.yaml', 'r') as file:
+            data = yaml.safe_load(file)
+
+        self.coco_class2id = data['classes']
+        self.coco_classes = list(self.coco_class2id.keys())
+        self.max_input_length = max_input_length
+
+    @staticmethod
+    def _extract_validate_bbox(y1, x1, y2, x2, original_image_shapes):
+        width, height = original_image_shapes
+        y1, x1, y2, x2 = map(lambda x: int(x) / 1024.0, [y1, x1, y2, x2])
+        y1, y2 = y1 * height, y2 * height
+        x1, x2 = x1 * width, x2 * width
+        is_valid_bbox = True
+
+        if (y1 >= y2) or (x1 >= x2):
+            is_valid_bbox = False
+
+        return (y1, x1, y2, x2), is_valid_bbox
+
+    @staticmethod
+    def _parse_label(label):
+        label_clean = label.strip().lower()
+        label_clean = re.sub(r'[^a-z]', ' ', label_clean)
+        label_clean = list(filter(lambda x: len(x) > 0, label_clean.split(' ')))  # additional spaces are tolerated
+        label_clean = ' '.join(label_clean)
+        return label_clean
+
+    def _decode_string_extract_scores(self, new_tokens_generated, probabilities):
+        decoded_strings = []
+        decoded_scores = []
+        string_position = 0
+        kept_token_id = 0
+        string_pos2kept_token_id = {}
+
+        for token, probas in zip(new_tokens_generated, probabilities):
+
+            if self.verbose and not np.allclose(np.max(probas), probas[token]):
+                print('Non argmax generation detected: ',
+                      f'Generated tokens: {new_tokens_generated}',
+                      f'Argmax values: {np.argmax(probabilities, axis=-1)}')
+
+            s = self.processor.decode([token], skip_special_tokens=True)
+            if not s:
+                continue
+
+            decoded_strings.append(s)
+            decoded_scores.append(probas[token].item())
+
+            for sp in range(string_position, string_position + len(s)):
+                string_pos2kept_token_id[sp] = kept_token_id
+
+            kept_token_id += 1
+            string_position += len(s)
+
+        decoded_string = ''.join(decoded_strings)
+
+        return decoded_string, decoded_scores, string_pos2kept_token_id
+
+    @staticmethod
+    def _annotate_bbox(annotator, x1, y1, x2, y2, label, label_score):
+        annotator.box_label([x1, y1, x2, y2],
+                            label + f'_{label_score:.3f}',
+                            color=(255, 0, 0),
+                            txt_color=(0, 0, 0))
+
+    def _parse_scores(self,
+                      new_tokens_generated: torch.tensor,
+                      prob_distribution_generated: torch.tensor,
+                      original_image_shapes: tuple,
+                      annotator=None
+                      ):
+        """
+        Parses bboxes, labels and scores from the model.generate() output.
+
+        Args:
+            new_tokens_generated (torch.tensor): Generated tokens excluding context.
+            logits_generated (torch.tensor): Generated logits for each token.
+
+        Returns:
+            type: Description of the return value.
+
+        """
+
+        assert len(new_tokens_generated) == len(prob_distribution_generated), \
+            'Numbers of generated tokens and logit vectors must be the same.'
+
+        if not self.processor.decode(new_tokens_generated, skip_special_tokens=True):
+            return []
+
+        decoded_string, \
+            decoded_scores, \
+            string_pos2kept_token_id = self._decode_string_extract_scores(new_tokens_generated,
+                                                                          prob_distribution_generated)
+        pattern = re.compile(self.pattern)
+
+        results = []
+        for match in pattern.finditer(decoded_string):
+            fr, to = match.span()
+            token_from = string_pos2kept_token_id[fr]
+            if to < len(decoded_string):
+                label_probabilities = decoded_scores[token_from + self.loc_tokens_expected_number:
+                                                     string_pos2kept_token_id[to]]
+            else:
+                label_probabilities = decoded_scores[token_from + self.loc_tokens_expected_number:]
+
+            y1, x1, y2, x2, label = match.groups()
+            (y1, x1, y2, x2), is_valid_bbox = PaliGemmaCocoPredictor._extract_validate_bbox(y1, x1, y2, x2,
+                                                                                            original_image_shapes)
+
+            if not is_valid_bbox:
+                continue
+
+            label_clean = PaliGemmaCocoPredictor._parse_label(label)
+
+            label_score = np.prod(label_probabilities).item()
+            if self.normalize_score_for_multi_token_label:
+                label_score = np.pow(label_score, 1.0 / len(label_probabilities)).item()
+
+            if annotator:
+                PaliGemmaCocoPredictor._annotate_bbox(annotator, x1, y1, x2, y2, label_clean, label_score)
+
+            results.append([y1, x1, y2, x2, label_clean, label_score])
+
+        return results
+
+    def _execute_batch(self, batch_images, batch_prompts, original_image_shapes, annotator=None):
+
+        model_inputs = self.processor(text=batch_prompts,
+                                      images=batch_images,
+                                      return_tensors="pt",
+                                      truncation=False,
+                                      padding='longest' if not self.max_input_length else 'max_length',
+                                      max_length=self.max_input_length,
+                                      ).to(torch.bfloat16).to(self.model.device)
+
+        input_len = model_inputs["input_ids"].shape[-1]
+
+        with torch.inference_mode():
+            generation = self.model.generate(**model_inputs,
+                                             max_new_tokens=self.max_new_tokens,
+                                             do_sample=self.do_sample,
+                                             return_dict_in_generate=True,
+                                             output_scores=True)
+        results = []
+        for pos_id in range(len(batch_images)):
+            new_tokens_generated = generation.sequences[pos_id][input_len:].detach().cpu().numpy().tolist()
+            logits_generated = torch.stack([x[pos_id] for x in generation.scores])
+            prob_distribution_generated = F.softmax(logits_generated, dim=-1).detach().cpu().numpy()
+
+            r = self._parse_scores(
+                new_tokens_generated,
+                prob_distribution_generated,
+                original_image_shapes,
+                annotator=annotator)
+            if r:
+                results.extend(r)
+
+        return results
+
+    def detect_coco(self,
+                    original_image: Image,
+                    annotator=None,
+                    filter_coco_classes=True,
+                    ):
+
+        splits = [self.coco_classes[i: i + self.classes_per_call]
+                  for i in range(0, len(self.coco_classes), self.classes_per_call)]
+
+        results = []
+
+        batch_images = []
+        batch_prompts = []
+
+        for classes in splits:
+            batch_images.append(original_image)
+
+            joined_classes = ' ; '.join(classes)
+            prompt = '<image>detect ' + joined_classes + '\n'
+            batch_prompts.append(prompt)
+
+            if len(batch_images) == self.batch_size:
+                r = self._execute_batch(batch_images, batch_prompts, original_image.size, annotator=annotator)
+                results.extend(r)
+                batch_images.clear()
+                batch_prompts.clear()
+
+        if batch_images:
+            r = self._execute_batch(batch_images, batch_prompts, original_image.size, annotator=annotator)
+            results.extend(r)
+
+        if not filter_coco_classes:
+            return results
+
+        return [r for r in results if r[-2] in self.coco_class2id]
+
+    def process_directory(self, path_to_images, json_annotations, predictions_filename="my_predictions.json"):
+
+        with open(json_annotations, 'r') as f:
+            data = json.load(f)
+
+        i2gt = {}
+        for item in data['annotations']:
+            if item['image_id'] not in i2gt:
+                i2gt[item['image_id']] = []
+
+            item = {x: item[x] for x in {'image_id', 'bbox', 'category_id'}}
+            i2gt[item['image_id']].append(item)
+
+        my_predictions = []
+        failed_images = []
+        for image_id in tqdm(i2gt):
+            try:
+                path_to_image = path_to_images / f'{image_id:012d}.jpg'
+                original_image = Image.open(path_to_image)
+
+                results = pg_predictor.detect_coco(original_image)
+
+                cat_ids = [coco80_to_coco91_class()[pg_predictor.coco_class2id[x[4]]] for x in results]
+                boxes = xyxy2ltwh(np.array([[x[1], x[0], x[3], x[2]] for x in results]))
+                scores = [x[-1] for x in results]
+
+                for bbox, cat, score in zip(boxes, cat_ids, scores):
+                    my_predictions.append(
+                        {
+                            'image_id': image_id,
+                            'file_name': f'{image_id:012d}.jpg',
+                            'category_id': cat,
+                            'bbox': bbox.tolist(),
+                            'score': score
+                        }
+                    )
+            except Exception as e:
+                print(f"Error processing image id: {image_id}")
+                failed_images.append(image_id)
+                traceback.print_exc()
+
+        with open(predictions_filename, 'w') as f:
+            json.dump(my_predictions, f)
+
+        print(f"Failed to process {len(failed_images)} images: {failed_images}")
+
+
+if __name__ == "__main__":
+    model_id = "/path/to/folder/models/paligemma2-10b-mix-448"
+    # model_id = "/path/to/folder/models/paligemma2-10b-pt-448"
+
+    # flash attention adds noise to prediction
+    # attn_implementation={
+    #     "text_decoder": "flash_attention_2",
+    #     "vision_encoder": "eager"
+    # }
+    model = PaliGemmaForConditionalGeneration.from_pretrained(model_id,
+                                                              dtype=torch.bfloat16,
+                                                              device_map="auto",
+                                                              )
+    model = torch.compile(model, dynamic=True)  # dynamic=True optional
+    model.eval()
+
+    processor = PaliGemmaProcessor.from_pretrained(model_id, use_fast=True)
+
+    pg_predictor = PaliGemmaCocoPredictor(model,
+                                          processor,
+                                          max_new_tokens=256,
+                                          do_sample=False,
+                                          classes_per_call=10,
+                                          batch_size=80,
+                                          debug_verbose=False,
+                                          normalize_score_for_multi_token_label=True,
+                                          max_input_length=None  # 1200
+                                          )
+
+    path_to_images = Path("/path/to/folder/coco/val2017")
+    json_annotations = Path("/path/to/folder/coco/annotations/annotations/instances_val2017.json")
+    pg_predictor.process_directory(path_to_images, json_annotations)
+
+    # Test pg_predictor.detect_coco
+    # original_image = Image.open("/path/to/folder/coco/val2017/000000398742.jpg")
+    # print(original_image.size)
+    # annotator = Annotator(original_image, line_width=1, font_size=11, pil=True)
+    # results = pg_predictor.detect_coco(original_image,
+    #                                    annotator=annotator
+    #                                    )
+    # print(results)
+    # result_img = annotator.result()
+    # plt.axis('off')
+    # plt.gcf().set_size_inches(15, 10)
+    # plt.imsave('annotation.jpg', result_img)
