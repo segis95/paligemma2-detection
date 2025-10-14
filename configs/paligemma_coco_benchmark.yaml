@@ -1,0 +1,19 @@
+model:
+  path: "/path/to/models/paligemma2-10b-mix-448" # "/path/to/models/paligemma2-10b-pt-448"
+  use_flash_attention: False
+
+generation:
+  do_sample: False
+  max_new_tokens: 256
+  max_input_length: null # 1200 valid option for 10b-448; may be useful with torch.compile(model, dynamic=False)
+  batch_size: 40
+
+coco:
+  normalize_score: True # score <- score^(1/n_tokens)
+  classes_per_call: 10 # prompt <- 'detect class1 ; class2 ; ... classN\n'
+  path_to_images: "/path/to/coco/val2017/"
+  json_annotations: "/path/to/coco/annotations/annotations/instances_val2017.json"
+
+#  hydra.job.chdir=True hydra.mode=MULTIRUN ++coco.classes_per_call=20,32,40,2,6
+
+
