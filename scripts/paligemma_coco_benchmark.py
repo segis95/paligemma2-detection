@@ -3,6 +3,7 @@ import re
 from pathlib import Path
 import traceback
 import os
+import datetime
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -29,6 +30,9 @@ from pycocotools.cocoeval import COCOeval
 
 logger = get_logger(__name__)
 
+if "RUN_TIMESTAMP" not in os.environ:
+    os.environ["RUN_TIMESTAMP"] = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
 
 class PaliGemmaCocoPredictor:
     def __init__(
@@ -40,7 +44,7 @@ class PaliGemmaCocoPredictor:
         classes_per_call=5,
         batch_size=80,
         debug_verbose=False,
-        normalize_score_for_multi_token_label=True,
+        score_aggregation_mode="product_norm",
         max_input_length=None,
         use_flash_attention=False,
     ):
@@ -51,9 +55,7 @@ class PaliGemmaCocoPredictor:
         self.classes_per_call = classes_per_call
         self.batch_size = batch_size
         self.verbose = debug_verbose
-        self.normalize_score_for_multi_token_label = (
-            normalize_score_for_multi_token_label
-        )
+        self.score_aggregation_mode = score_aggregation_mode
         self.pattern = r"<loc(\d{4})><loc(\d{4})><loc(\d{4})><loc(\d{4})>([^;<]+)"
         self.loc_tokens_expected_number = 4
 
@@ -151,6 +153,25 @@ class PaliGemmaCocoPredictor:
             txt_color=(0, 0, 0),
         )
 
+    def _aggregate_scores(self, scores: np.array):
+        match self.score_aggregation_mode:
+            case "first":
+                return scores[0]
+            case "average":
+                return np.mean(scores).item()
+            case "product":
+                return np.prod(scores).item()
+            case "product_norm":
+                return np.pow(np.prod(scores), 1.0 / len(scores)).item()
+            case "max":
+                return np.max(scores).item()
+            case "min":
+                return np.min(scores).item()
+            case _:
+                raise NotImplementedError(
+                    f"Unknown aggregation mode: {self.score_aggregation_mode}"
+                )
+
     def _parse_scores(
         self,
         new_tokens_generated: np.ndarray,
@@ -210,9 +231,7 @@ class PaliGemmaCocoPredictor:
 
             label_clean = PaliGemmaCocoPredictor._parse_label(label)
 
-            label_score = np.prod(label_probabilities).item()
-            if self.normalize_score_for_multi_token_label:
-                label_score = np.pow(label_score, 1.0 / len(label_probabilities)).item()
+            label_score = self._aggregate_scores(label_probabilities)
 
             if annotator:
                 PaliGemmaCocoPredictor._annotate_bbox(
@@ -299,7 +318,7 @@ class PaliGemmaCocoPredictor:
         """
 
         splits = [
-            self.coco_classes[i: i + self.classes_per_call]
+            self.coco_classes[i : i + self.classes_per_call]
             for i in range(0, len(self.coco_classes), self.classes_per_call)
         ]
 
@@ -453,6 +472,8 @@ class PaliGemmaCocoPredictor:
                 json_annotations, predictions_folder / predictions_filename
             )
 
+        self.distributed_state.wait_for_everyone()
+
     def _save_local_predictions_rank(
         self, my_predictions: list, predictions_folder: Path
     ):
@@ -485,6 +506,31 @@ class PaliGemmaCocoPredictor:
         coco_eval.evaluate()
         coco_eval.accumulate()
         coco_eval.summarize()
+
+        stats = coco_eval.stats
+
+        # fmt: off
+        metrics = [
+            ('Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ]', stats[0]),
+            ('Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ]', stats[1]),
+            ('Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ]', stats[2]),
+            ('Average Precision  (AP) @[ IoU=0.50:0.95 | area= small | maxDets=100 ]', stats[3]),
+            ('Average Precision  (AP) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ]', stats[4]),
+            ('Average Precision  (AP) @[ IoU=0.50:0.95 | area= large | maxDets=100 ]', stats[5]),
+            ('Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=  1 ]', stats[6]),
+            ('Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets= 10 ]', stats[7]),
+            ('Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ]', stats[8]),
+            ('Average Recall     (AR) @[ IoU=0.50:0.95 | area= small | maxDets=100 ]', stats[9]),
+            ('Average Recall     (AR) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ]', stats[10]),
+            ('Average Recall     (AR) @[ IoU=0.50:0.95 | area= large | maxDets=100 ]', stats[11]),
+        ]
+        # fmt: on
+
+        result = []
+        for metric_name, value in metrics:
+            result.append(f" {metric_name} = {value:.3f}")
+
+        logger.info("\n".join(result))
 
 
 def test_detect_coco(paligemma_predictor: PaliGemmaCocoPredictor, path_to_image: Path):
@@ -519,7 +565,7 @@ def main(cfg: DictConfig):
         do_sample=cfg.generation.do_sample,
         classes_per_call=cfg.coco.classes_per_call,
         batch_size=cfg.generation.batch_size,
-        normalize_score_for_multi_token_label=cfg.coco.normalize_score,
+        score_aggregation_mode=cfg.coco.score_aggregation_mode,
         max_input_length=cfg.generation.max_input_length,
     )
 
