@@ -16,7 +16,7 @@ coco:
   # product_norm: (p1, p2, ..., pn) -> (\prod_i p_i)^(1/n)
   # max: (p1, p2, ..., pn) -> max(p1, p2, ..., pn)
   # min: (p1, p2, ..., pn) -> min(p1, p2, ..., pn)
-  score_aggregation_mode: "product"
+  score_aggregation_mode: "product_norm"
   # determines how many of 80 COCO classes are processed in a one PaliGemma call
   # prompt <- '<image>detect class#1 ; class#2 ; ... class#{classes_per_call}\n'
   classes_per_call: 10
@@ -28,8 +28,10 @@ hydra:
     chdir: true
   run:
     dir: ./outputs/${oc.env:RUN_TIMESTAMP}
-
-# hydra.mode=MULTIRUN ++coco.classes_per_call=1,2,4,8,16,32,64
+  sweep:
+    dir: ./multirun/${oc.env:RUN_TIMESTAMP}
+    subdir: ${hydra.job.num}
+#  hydra.mode=MULTIRUN ++coco.classes_per_call=80,60,40,32,20,16,14,12,10,8,6,4,2,1
 # hydra.mode=MULTIRUN ++coco.score_aggregation_mode=first,average,product,product_norm,max,min
 
 

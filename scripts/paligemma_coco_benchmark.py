@@ -4,6 +4,10 @@ from pathlib import Path
 import traceback
 import os
 import datetime
+import warnings
+from functools import partial
+from typing import Callable
+import tempfile
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -18,20 +22,39 @@ from transformers import (
 )
 from accelerate import PartialState
 from accelerate.logging import get_logger
+from accelerate.utils import broadcast_object_list
 import hydra
 from hydra.utils import to_absolute_path
 from omegaconf import DictConfig, OmegaConf
 
 from ultralytics.data.converter import coco80_to_coco91_class
-from ultralytics.utils.ops import xyxy2ltwh
+from ultralytics.utils.ops import xyxy2ltwh, ltwh2xyxy
 from ultralytics.utils.plotting import Annotator
+from ultralytics.utils.nms import TorchNMS
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
 logger = get_logger(__name__)
 
+
+def get_synced_timestamp():
+    """Generate timestamp on main process and broadcast to all ranks."""
+    distributed_state = PartialState()
+
+    if distributed_state.is_main_process:
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d/%H-%M-%S")
+    else:
+        timestamp = None
+
+    # Broadcast from rank 0 to all ranks
+    timestamp_list = [timestamp]
+    broadcast_object_list(timestamp_list, from_process=0)
+
+    return timestamp_list[0]
+
+
 if "RUN_TIMESTAMP" not in os.environ:
-    os.environ["RUN_TIMESTAMP"] = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    os.environ["RUN_TIMESTAMP"] = get_synced_timestamp()
 
 
 class PaliGemmaCocoPredictor:
@@ -117,15 +140,17 @@ class PaliGemmaCocoPredictor:
         kept_token_id = 0
         string_pos2kept_token_id = {}
 
-        for token, probas in zip(new_tokens_generated, probabilities):
+        if self.verbose and not all(
+            np.allclose(np.max(probas), probas[token])
+            for token, probas in zip(new_tokens_generated, probabilities)
+        ):
+            logger.debug(
+                "Non argmax generation detected\n"
+                f"Generated tokens: {new_tokens_generated}\n"
+                f"Argmax values: {np.argmax(probabilities, axis=-1)}"
+            )
 
-            if self.verbose and not np.allclose(np.max(probas), probas[token]):
-                logger.debug(
-                    "Non argmax generation detected: ",
-                    f"Generated tokens: {new_tokens_generated}",
-                    f"Argmax values: {np.argmax(probabilities, axis=-1)}",
-                    main_process_only=False,
-                )
+        for token, probas in zip(new_tokens_generated, probabilities):
 
             s = self.processor.decode([token], skip_special_tokens=True)
             if not s:
@@ -145,10 +170,10 @@ class PaliGemmaCocoPredictor:
         return decoded_string, decoded_scores, string_pos2kept_token_id
 
     @staticmethod
-    def _annotate_bbox(item: dict):
+    def annotate_bbox(item: dict):
         item["annotator"].box_label(
             (item["x1"], item["y1"], item["x2"], item["y2"]),
-            item["label"] + f"_{item['label_score']:.3f}",
+            item["label"] + f"_{item['score']:.3f}",
             color=(255, 0, 0),
             txt_color=(0, 0, 0),
         )
@@ -172,12 +197,11 @@ class PaliGemmaCocoPredictor:
                     f"Unknown aggregation mode: {self.score_aggregation_mode}"
                 )
 
-    def _parse_scores(
+    def _parse_predictions(
         self,
         new_tokens_generated: np.ndarray,
         prob_distribution_generated: np.ndarray,
         original_image_shapes: tuple,
-        annotator: Annotator | None = None,
     ):
         """
         Parses bboxes, labels and scores from the model.generate() output.
@@ -186,7 +210,6 @@ class PaliGemmaCocoPredictor:
             new_tokens_generated (np.ndarray): Generated tokens excluding context.
             logits_generated (np.ndarray): Generated logits for each token.
             original_image_shapes (tuple): Original image shapes.
-            annotator (Annotator | None): Annotator to use.
 
         Returns list of parsed bboxes, labels and scores.
         """
@@ -208,7 +231,17 @@ class PaliGemmaCocoPredictor:
         results = []
         for match in pattern.finditer(decoded_string):
             fr, to = match.span()
+
             token_from = string_pos2kept_token_id[fr]
+
+            if self.verbose:
+                tt = string_pos2kept_token_id[to] if to < len(decoded_string) else ""
+                logger.debug(
+                    f"fr: {fr}, to: {to}, len: {len(decoded_string)} {decoded_string} "
+                    f"token_from: {token_from} "
+                    f"token_to: {tt}; max_token: {max(string_pos2kept_token_id.values())}; "
+                    f"{match.groups()}"
+                )
             if to < len(decoded_string):
                 label_probabilities = decoded_scores[
                     token_from
@@ -218,6 +251,9 @@ class PaliGemmaCocoPredictor:
                 label_probabilities = decoded_scores[
                     token_from + self.loc_tokens_expected_number :
                 ]
+
+            if not label_probabilities:
+                continue
 
             y1, x1, y2, x2, label = match.groups()
             (y1, x1, y2, x2), is_valid_bbox = (
@@ -233,20 +269,7 @@ class PaliGemmaCocoPredictor:
 
             label_score = self._aggregate_scores(label_probabilities)
 
-            if annotator:
-                PaliGemmaCocoPredictor._annotate_bbox(
-                    {
-                        "annotator": annotator,
-                        "x1": x1,
-                        "y1": y1,
-                        "x2": x2,
-                        "y2": y2,
-                        "label": label_clean,
-                        "score": label_score,
-                    }
-                )
-
-            results.append([y1, x1, y2, x2, label_clean, label_score])
+            results.append([y1, x1, y2, x2, label_score, label_clean])
 
         return results
 
@@ -255,7 +278,6 @@ class PaliGemmaCocoPredictor:
         batch_images: list,
         batch_prompts: list,
         original_image_shapes: tuple,
-        annotator: Annotator | None = None,
     ):
         """
         Runs generation on batch, parses and returns bboxes, labels and scores.
@@ -294,32 +316,42 @@ class PaliGemmaCocoPredictor:
                 F.softmax(logits_generated, dim=-1).detach().cpu().numpy()
             )
 
-            r = self._parse_scores(
+            r = self._parse_predictions(
                 new_tokens_generated,
                 prob_distribution_generated,
                 original_image_shapes,
-                annotator=annotator,
             )
             if r:
                 results.extend(r)
 
         return results
 
-    def detect_coco(
+    def detect(
         self,
         original_image: Image.Image,
-        annotator: Annotator | None = None,
+        custom_classes: list[str] | None = None,
         filter_coco_classes=True,
     ):
         """
-        Forms all prompts for a given image w.r.t. self.classes_per_call and
-        processes them in batches.
-        Extracts predictions of all COCO classes for the given image .
+        original_image: RGB image
+
+        Forms all prompts for a given image w.r.t. self.classes_per_call or
+        custom_classes (if nonempty) and processes them in batches.
+        Extracts predictions for all COCO or custom_classes for the image .
         """
 
+        if custom_classes and filter_coco_classes:
+            warnings.warn(
+                "filter_coco_classes=True by default. "
+                "Make sure it's expected behavior when using custom classes "
+                "or set filter_coco_classes=False.",
+                UserWarning,
+            )
+        classes_to_detect = custom_classes if custom_classes else self.coco_classes
+
         splits = [
-            self.coco_classes[i : i + self.classes_per_call]
-            for i in range(0, len(self.coco_classes), self.classes_per_call)
+            classes_to_detect[i : i + self.classes_per_call]
+            for i in range(0, len(classes_to_detect), self.classes_per_call)
         ]
 
         results = []
@@ -339,22 +371,19 @@ class PaliGemmaCocoPredictor:
                     batch_images,
                     batch_prompts,
                     original_image.size,
-                    annotator=annotator,
                 )
                 results.extend(r)
                 batch_images.clear()
                 batch_prompts.clear()
 
         if batch_images:
-            r = self._execute_batch(
-                batch_images, batch_prompts, original_image.size, annotator=annotator
-            )
+            r = self._execute_batch(batch_images, batch_prompts, original_image.size)
             results.extend(r)
 
         if not filter_coco_classes:
             return results
 
-        return [r for r in results if r[-2] in self.coco_class2id]
+        return [r for r in results if r[-1] in self.coco_class2id]
 
     def _extract_detection_results_in_benchmark_format(
         self, predictions: list, image_id: int
@@ -369,10 +398,10 @@ class PaliGemmaCocoPredictor:
 
         results = []
         cat_ids = [
-            coco80_to_coco91_class()[self.coco_class2id[x[4]]] for x in predictions
+            coco80_to_coco91_class()[self.coco_class2id[x[5]]] for x in predictions
         ]
         boxes = xyxy2ltwh(np.array([[x[1], x[0], x[3], x[2]] for x in predictions]))
-        scores = [x[-1] for x in predictions]
+        scores = [x[4] for x in predictions]
 
         for bbox, cat, score in zip(boxes, cat_ids, scores):
             results.append(
@@ -417,6 +446,7 @@ class PaliGemmaCocoPredictor:
     ):
         """
         Spits images between ranks and runs predictions.
+        Images are expected to be in the RGB mode.
         """
 
         my_predictions = []
@@ -437,7 +467,7 @@ class PaliGemmaCocoPredictor:
                 try:
                     path_to_image = path_to_images / f"{image_id:012d}.jpg"
                     original_image = Image.open(path_to_image)
-                    results = self.detect_coco(original_image)
+                    results = self.detect(original_image)
                     my_predictions.extend(
                         self._extract_detection_results_in_benchmark_format(
                             results, image_id
@@ -467,7 +497,6 @@ class PaliGemmaCocoPredictor:
         if self.distributed_state.is_main_process:
             self._collect_all_json_and_save(predictions_folder, predictions_filename)
 
-            logger.info("Calculating COCO metrics...")
             PaliGemmaCocoPredictor.calculate_coco_metrics(
                 json_annotations, predictions_folder / predictions_filename
             )
@@ -497,11 +526,102 @@ class PaliGemmaCocoPredictor:
             json.dump(all_predictions, f)
 
     @staticmethod
-    def calculate_coco_metrics(
-        json_annotations: Path | str, json_predictions: Path | str
+    def _appply_nms_benchmark_format(
+        json_predictions: Path | str, nms_callable: Callable
     ):
+        with open(json_predictions, "r") as f:
+            data = json.load(f)
+
+        i2gt: dict[int, list] = {}
+        for item in data:
+            if item["image_id"] not in i2gt:
+                i2gt[item["image_id"]] = []
+            i2gt[item["image_id"]].append(item)
+
+        results = []
+        for image_id, group in i2gt.items():
+            bboxes_scores_labels = []
+            for item in group:
+                box_array_ltwh = np.array([*item["bbox"]])
+                box_list_xyxy = ltwh2xyxy(box_array_ltwh).tolist()
+                box_list = [*box_list_xyxy, item["score"], item["category_id"]]
+                bboxes_scores_labels.append(box_list)
+
+            nms_result = nms_callable(bboxes_scores_labels)
+
+            for x1, y1, x2, y2, score, category_id in nms_result:
+
+                results.append(
+                    {
+                        "image_id": image_id,
+                        "file_name": f"{image_id:012d}.jpg",
+                        "category_id": category_id,
+                        "bbox": xyxy2ltwh(np.array([x1, y1, x2, y2])).tolist(),
+                        "score": score,
+                    }
+                )
+
+        return results
+
+    @staticmethod
+    def apply_nms_to_predictions(detections, iou_threshold=0.7, conf_threshold=0.001):
+
+        detections = [det for det in detections if det[4] > conf_threshold]
+        if not detections:
+            return []
+
+        categories = set(det[-1] for det in detections)
+        category2id = {cat: i for i, cat in enumerate(categories)}
+
+        boxes = []
+        scores = []
+        idxs = []
+
+        for det in detections:
+            boxes.append([*det[:4]])
+            scores.append(det[4])
+            idxs.append(category2id[det[5]])
+
+        boxes = torch.tensor(boxes)
+        scores = torch.tensor(scores)
+        idxs = torch.tensor(idxs)
+
+        result_idx = (
+            TorchNMS.batched_nms(boxes, scores, idxs, iou_threshold=iou_threshold)
+            .numpy()
+            .tolist()
+        )
+
+        return [detections[i] for i in result_idx]
+
+    @staticmethod
+    def calculate_coco_metrics(
+        json_annotations: Path | str,
+        json_predictions: Path | str,
+        nms_callable: Callable | None = partial(
+            apply_nms_to_predictions,
+            conf_threshold=0.001,
+            iou_threshold=0.7,
+        ),
+    ):
+        logger.info(f"Calculating COCO metrics. NMS: {nms_callable}")
+
         coco_gt = COCO(str(json_annotations))
-        coco_pred = coco_gt.loadRes(str(json_predictions))
+
+        if nms_callable is not None:
+            with tempfile.NamedTemporaryFile(mode="w+") as temp:
+
+                filtered_data = PaliGemmaCocoPredictor._appply_nms_benchmark_format(
+                    json_predictions, nms_callable
+                )
+
+                with open(temp.name, "w") as f:
+                    json.dump(filtered_data, f)
+
+                coco_pred = coco_gt.loadRes(temp.name)
+        else:
+            coco_pred = coco_gt.loadRes(str(json_predictions))
+
         coco_eval = COCOeval(coco_gt, coco_pred, iouType="bbox")
         coco_eval.evaluate()
         coco_eval.accumulate()
@@ -533,24 +653,71 @@ class PaliGemmaCocoPredictor:
         logger.info("\n".join(result))
 
 
-def test_detect_coco(paligemma_predictor: PaliGemmaCocoPredictor, path_to_image: Path):
+def run_detection(
+    paligemma_predictor: PaliGemmaCocoPredictor,
+    path_to_image: Path,
+    classes: list[str] | None = None,
+    save_path: Path | str | None = None,
+    line_width: int = 1,
+    font_size: int = 11,
+    nms_callable: Callable | None = partial(
+        PaliGemmaCocoPredictor.apply_nms_to_predictions,
+        conf_threshold=0.25,
+        iou_threshold=0.7,
+    ),
+):
+    """
+    Runs detection with paligemma_predictor on image at path_to_image.
+    Detects classes from classes list if nonempty, otherwise detects coco classes (80).
+    Optionally saves the image to save_path.
+    Returns detections in xyxy format.
+    """
     original_image = Image.open(path_to_image)
-    logger.info(f"Original image size: {original_image.size}")
-    annotator = Annotator(original_image, line_width=1, font_size=11, pil=True)
-    results = paligemma_predictor.detect_coco(original_image, annotator=annotator)
-    logger.info(f"Results:\n{'\n'.join(str(x) for x in results)}")
-    result_img = annotator.result()
-    plt.axis("off")
-    plt.gcf().set_size_inches(15, 10)
-    plt.imsave("annotation.jpg", result_img)
+    if original_image.mode != "RGB":
+        tmp_image = original_image.convert("RGB")
+        original_image.close()
+        original_image = tmp_image
+
+    annotator = Annotator(
+        original_image, line_width=line_width, font_size=font_size, pil=True
+    )
+    results = paligemma_predictor.detect(
+        original_image,
+        custom_classes=classes,
+        filter_coco_classes=not bool(classes),
+    )
+
+    if nms_callable is not None:
+        results = nms_callable(results)
+
+    for x1, y1, x2, y2, score, label in results:
+        PaliGemmaCocoPredictor.annotate_bbox(
+            {
+                "annotator": annotator,
+                "x1": y1,
+                "y1": x1,
+                "x2": y2,
+                "y2": x2,
+                "label": label,
+                "score": score,
+            }
+        )
+
+    annotated_img = annotator.result()
+
+    if save_path:
+        plt.imsave(save_path, annotated_img)
+
+    plt.close()
     original_image.close()
-    logger.info("Saved vizualization to ./annotation.jpg")
+
+    return results, annotated_img
 
 
 @hydra.main(
     version_base=None,
     config_path="../configs",
-    config_name="paligemma_coco_benchmark.yaml",
+    config_name="paligemma_coco_inference.yaml",
 )
 def main(cfg: DictConfig):
     distributed_state = PartialState()
@@ -574,7 +741,12 @@ def main(cfg: DictConfig):
     pg_predictor.process_directory(path_to_images, json_annotations)
 
     # coco_img_example = "000000398742.jpg"
-    # test_detect_coco(pg_predictor, Path(cfg.coco.path_to_images) / coco_img_example)
+    # results, _ = run_detection(
+    #     pg_predictor,
+    #     Path(cfg.coco.path_to_images) / coco_img_example,
+    #     save_path="test_predictions.jpg"
+    # )
+    # print(results)
 
 
 if __name__ == "__main__":
