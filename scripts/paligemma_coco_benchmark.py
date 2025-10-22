@@ -8,6 +8,8 @@ import warnings
 from functools import partial
 from typing import Callable
 import tempfile
+import glob
+import time
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -39,7 +41,7 @@ logger = get_logger(__name__)
 
 def get_synced_timestamp():
     """Generate timestamp on main process and broadcast to all ranks."""
-    distributed_state = PartialState()
+    distributed_state = PartialState(timeout=datetime.timedelta(minutes=600))
 
     if distributed_state.is_main_process:
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d/%H-%M-%S")
@@ -55,6 +57,7 @@ def get_synced_timestamp():
 
 if "RUN_TIMESTAMP" not in os.environ:
     os.environ["RUN_TIMESTAMP"] = get_synced_timestamp()
+    os.environ["TORCH_NCCL_BLOCKING_WAIT"] = "1"
 
 
 class PaliGemmaCocoPredictor:
@@ -564,7 +567,9 @@ class PaliGemmaCocoPredictor:
         return results
 
     @staticmethod
-    def apply_nms_to_predictions(detections, iou_threshold=0.7, conf_threshold=0.001):
+    def apply_nms_to_predictions(
+        detections, iou_threshold=0.7, conf_threshold=0.001, class_agnostic=False
+    ):
 
         detections = [det for det in detections if det[4] > conf_threshold]
         if not detections:
@@ -580,7 +585,11 @@ class PaliGemmaCocoPredictor:
         for det in detections:
             boxes.append([*det[:4]])
             scores.append(det[4])
-            idxs.append(category2id[det[5]])
+
+            if class_agnostic:
+                idxs.append(0)
+            else:
+                idxs.append(category2id[det[5]])
 
         boxes = torch.tensor(boxes)
         scores = torch.tensor(scores)
@@ -602,9 +611,12 @@ class PaliGemmaCocoPredictor:
             apply_nms_to_predictions,
             conf_threshold=0.001,
             iou_threshold=0.7,
+            class_agnostic=False,
         ),
     ):
-        logger.info(f"Calculating COCO metrics. NMS: {nms_callable}")
+        logger.info(
+            f"Calculating COCO metrics. NMS: {nms_callable.keywords if nms_callable else ''}"
+        )
 
         coco_gt = COCO(str(json_annotations))
 
@@ -664,6 +676,7 @@ def run_detection(
         PaliGemmaCocoPredictor.apply_nms_to_predictions,
         conf_threshold=0.25,
         iou_threshold=0.7,
+        class_agnostic=False,
     ),
 ):
     """
@@ -724,29 +737,33 @@ def main(cfg: DictConfig):
 
     logger.info(OmegaConf.to_yaml(cfg))
 
-    pg_predictor = PaliGemmaCocoPredictor(
-        Path(cfg.model.path),
-        distributed_state,
-        use_flash_attention=cfg.model.use_flash_attention,
-        max_new_tokens=cfg.generation.max_new_tokens,
-        do_sample=cfg.generation.do_sample,
-        classes_per_call=cfg.coco.classes_per_call,
-        batch_size=cfg.generation.batch_size,
-        score_aggregation_mode=cfg.coco.score_aggregation_mode,
-        max_input_length=cfg.generation.max_input_length,
-    )
+    try:
+        pg_predictor = PaliGemmaCocoPredictor(
+            Path(cfg.model.path),
+            distributed_state,
+            use_flash_attention=cfg.model.use_flash_attention,
+            max_new_tokens=cfg.generation.max_new_tokens,
+            do_sample=cfg.generation.do_sample,
+            classes_per_call=cfg.coco.classes_per_call,
+            batch_size=cfg.generation.batch_size,
+            score_aggregation_mode=cfg.coco.score_aggregation_mode,
+            max_input_length=cfg.generation.max_input_length,
+        )
 
-    path_to_images = Path(cfg.coco.path_to_images)
-    json_annotations = Path(cfg.coco.json_annotations)
-    pg_predictor.process_directory(path_to_images, json_annotations)
+        path_to_images = Path(cfg.coco.path_to_images)
+        json_annotations = Path(cfg.coco.json_annotations)
+        pg_predictor.process_directory(path_to_images, json_annotations)
 
-    # coco_img_example = "000000398742.jpg"
-    # results, _ = run_detection(
-    #     pg_predictor,
-    #     Path(cfg.coco.path_to_images) / coco_img_example,
-    #     save_path="test_predictions.jpg"
-    # )
-    # print(results)
+        # coco_img_example = "000000398742.jpg"
+        # results, _ = run_detection(
+        #     pg_predictor,
+        #     Path(cfg.coco.path_to_images) / coco_img_example,
+        #     save_path="test_predictions.jpg"
+        # )
+        # print(results)
+    finally:
+        distributed_state.wait_for_everyone()
+        distributed_state.destroy_process_group()
 
 
 if __name__ == "__main__":

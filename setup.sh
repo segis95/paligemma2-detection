@@ -37,3 +37,5 @@ pip install mypy
 mypy --install-types --non-interactive
 
 pip install pylint
+
+pip install albumentations
