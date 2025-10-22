@@ -1,0 +1,42 @@
+defaults:
+  - optimizer: adamw
+  - lora: default
+  - scheduler: cosine
+
+# Data configuration
+data:
+  json_annotations_train: ??? #"coco/annotations/annotations/instances_train2017.json"
+  json_annotations_val: ??? #"coco/annotations/annotations/instances_val2017.json"
+  images_dir_train: ??? #"coco/train2017"
+  images_dir_val: ??? #"/coco/val2017"
+
+model: "models/paligemma2-10b-pt-448"
+
+# Training hyperparameters
+training:
+  num_epochs: 5
+  batch_size: 2
+  prefetch_batches: 1
+  gradient_accumulation_steps: 1
+  max_grad_norm: 1.0
+
+  # Validation settings
+  val_every_n_steps: 500
+  val_batches: 50
+
+# Logging configuration
+logging:
+  tensorboard_dir: ??? #tb/runs_1/${now:%Y-%m-%d_%H-%M-%S}
+  log_every_n_steps: 10
+
+# Checkpointing
+checkpointing:
+  checkpoint_dir: ??? #checkpoints/${now:%Y-%m-%d_%H-%M-%S}
+  save_every_n_epochs: 1
+  keep_last_n_checkpoints: 3
+
+# Mixed precision
+mixed_precision: bf16
+
+# Seed
+seed: 42
