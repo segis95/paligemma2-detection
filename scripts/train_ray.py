@@ -14,14 +14,14 @@ from hydra.utils import instantiate
 from transformers import PaliGemmaProcessor, PaliGemmaForConditionalGeneration
 from peft import get_peft_model
 
-from ray.air import session
-from ray.train import ScalingConfig
+
+from ray.train import ScalingConfig, Checkpoint
 from ray.air.config import RunConfig, CheckpointConfig
-from ray.train.torch import TorchTrainer  # <-- замена AccelerateTrainer
+from ray.train.torch import TorchTrainer
 
 from data_pipeline import get_train_ds, get_val_ds
 
-# При необходимости можно включить ограничения по потокам
+# Limit threading
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["RAYON_NUM_THREADS"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -37,7 +37,6 @@ def setup_directories(cfg: DictConfig):
 
 
 def build_datasets(cfg: DictConfig, preprocessor):
-    # Возвращаем Ray Dataset'ы; шардирование сделает Ray на воркерах
     train_ds = get_train_ds(
         cfg.data.json_annotations_train,
         Path(cfg.data.images_dir_train),
@@ -56,11 +55,9 @@ def train_loop(config: Dict[str, Any]):
     from accelerate import Accelerator, DistributedDataParallelKwargs
     from torch.utils.tensorboard import SummaryWriter
 
-    # Сидирование
     torch.manual_seed(config["seed"])
     np.random.seed(config["seed"])
 
-    # Accelerator с DDP kwargs; DDP окружение поднимет TorchTrainer
     ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
     accelerator = Accelerator(
         mixed_precision=config.get("mixed_precision", "bf16"),
@@ -73,16 +70,13 @@ def train_loop(config: Dict[str, Any]):
     if accelerator.is_main_process:
         writer = SummaryWriter(log_dir=config["tensorboard_dir"])
 
-    # Модель и процессор (dtype bf16 как было)
     model = PaliGemmaForConditionalGeneration.from_pretrained(
         config["model_name"], dtype=torch.bfloat16
     )
-    # LoRA
     lora_cfg = OmegaConf.create(config["lora"])
     model = get_peft_model(model, instantiate(lora_cfg))
     model.print_trainable_parameters()
 
-    # Оптимизатор и шедулер
     optimizer = instantiate(
         OmegaConf.create(config["optimizer"]), params=model.parameters()
     )
@@ -93,18 +87,42 @@ def train_loop(config: Dict[str, Any]):
         num_training_steps=total_steps,
     )
 
-    # Подготовка через Accelerator
     model, optimizer, scheduler = accelerator.prepare(model, optimizer, scheduler)
 
-    # Получаем шарды Ray Data на воркере
-    train_it = session.get_dataset_shard("train")
-    val_it = session.get_dataset_shard("val")
+    train_it = train.get_dataset_shard("train")
+    val_it = train.get_dataset_shard("val")
 
+    # Checkpoint recovering: first attempting from the current run,
+    # then path from start_with_checkpoint if available
+    epoch_start = 0
     global_step = 0
+    maybe_ckpt = train.get_checkpoint()
+    if maybe_ckpt is None and config.get("start_with_checkpoint"):
+        if isinstance(config["start_with_checkpoint"], str) and config["start_with_checkpoint"]:
+            maybe_ckpt = Checkpoint.from_directory(config["start_with_checkpoint"])
+
+    if maybe_ckpt is not None:
+        ckpt_dir = maybe_ckpt.to_directory()
+        unwrapped = accelerator.unwrap_model(model)
+
+        weights_path = Path(ckpt_dir) / "model" / "pytorch_model.bin"
+        if weights_path.exists():
+            state_dict = torch.load(weights_path, map_location="cpu")
+            unwrapped.load_state_dict(state_dict)
+
+        state_path = Path(ckpt_dir) / "training_state.pt"
+        if state_path.exists():
+            saved = torch.load(state_path, map_location="cpu")
+            optimizer.load_state_dict(saved.get("optimizer_state_dict", {}))
+            scheduler.load_state_dict(saved.get("scheduler_state_dict", {}))
+            epoch_start = int(saved.get("epoch", 0))
+            global_step = int(saved.get("global_step", 0))
+
+        accelerator.wait_for_everyone()
+
     model.train()
 
     def to_device(batch: dict, device: torch.device) -> dict:
-        # Универсально переносим и torch.Tensor, и numpy.ndarray
         out = {}
         for k, v in batch.items():
             if isinstance(v, torch.Tensor):
@@ -115,8 +133,7 @@ def train_loop(config: Dict[str, Any]):
                 out[k] = v
         return out
 
-    # Обучение по эпохам
-    for epoch in range(config["num_epochs"]):
+    for epoch in range(epoch_start, config["num_epochs"]):
         epoch_loss = 0.0
         num_batches = 0
 
@@ -152,7 +169,6 @@ def train_loop(config: Dict[str, Any]):
                         "train/learning_rate", scheduler.get_last_lr()[0], global_step
                     )
 
-                # Периодическая валидация
                 if global_step % config["val_every_n_steps"] == 0:
                     val_loss = None
                     if accelerator.is_main_process:
@@ -178,14 +194,12 @@ def train_loop(config: Dict[str, Any]):
                                 )
                                 total_val_loss += vout.loss.item()
                                 val_batches += 1
-                        val_loss = (
-                            total_val_loss / val_batches if val_batches > 0 else 0.0
-                        )
+                        val_loss = total_val_loss / val_batches if val_batches > 0 else 0.0
                         model.train()
                         writer.add_scalar("val/loss", val_loss, global_step)
 
-                    # Репортим метрики (и при необходимости чекпоинт ниже)
-                    session.report(
+                    # reporting validation
+                    train.report(
                         {
                             "epoch": epoch,
                             "global_step": global_step,
@@ -194,40 +208,40 @@ def train_loop(config: Dict[str, Any]):
                         }
                     )
 
-        # Лог по эпохе
+                # reporting checkpoint
+                if accelerator.is_main_process and config["save_every_n_steps"] > 0:
+                    if global_step % config["save_every_n_steps"] == 0:
+                        with tempfile.TemporaryDirectory() as tmpdir:
+                            unwrapped = accelerator.unwrap_model(model)
+                            model_dir = Path(tmpdir) / "model"
+                            model_dir.mkdir(parents=True, exist_ok=True)
+
+                            unwrapped.save_pretrained(model_dir)
+
+                            torch.save(
+                                {
+                                    "optimizer_state_dict": optimizer.state_dict(),
+                                    "scheduler_state_dict": scheduler.state_dict(),
+                                    "epoch": epoch,
+                                    "global_step": global_step,
+                                },
+                                Path(tmpdir) / "training_state.pt",
+                            )
+
+                            ckpt = Checkpoint.from_directory(tmpdir)
+                            train.report(
+                                {
+                                    "epoch": epoch,
+                                    "global_step": global_step,
+                                    "step_checkpoint": True,
+                                },
+                                checkpoint=ckpt,
+                            )
+
+        # epoch log
         avg_epoch_loss = epoch_loss / num_batches if num_batches > 0 else 0.0
         if writer and accelerator.is_main_process:
             writer.add_scalar("train/epoch_loss", avg_epoch_loss, epoch + 1)
-
-        # Чекпоинт по эпохам (rank 0)
-        if accelerator.is_main_process and (
-                (epoch + 1) % config["save_every_n_epochs"] == 0
-        ):
-            with tempfile.TemporaryDirectory() as tmpdir:
-                unwrapped = accelerator.unwrap_model(model)
-                model_dir = Path(tmpdir) / "model"
-                model_dir.mkdir(parents=True, exist_ok=True)
-                unwrapped.save_pretrained(model_dir)
-
-                torch.save(
-                    {
-                        "optimizer_state_dict": optimizer.state_dict(),
-                        "scheduler_state_dict": scheduler.state_dict(),
-                        "epoch": epoch + 1,
-                        "global_step": global_step,
-                    },
-                    Path(tmpdir) / "training_state.pt",
-                )
-
-                ckpt = train.Checkpoint.from_directory(tmpdir)
-                session.report(
-                    {
-                        "epoch": epoch + 1,
-                        "global_step": global_step,
-                        "avg_epoch_loss": avg_epoch_loss,
-                    },
-                    checkpoint=ckpt,
-                )
 
     if writer and accelerator.is_main_process:
         writer.close()
@@ -235,7 +249,7 @@ def train_loop(config: Dict[str, Any]):
 
 @hydra.main(config_path="../configs", config_name="train_ray", version_base=None)
 def main(cfg: DictConfig):
-    # Настройка Ray Data контекста (опционально)
+
     from ray.data import ExecutionOptions, ExecutionResources
 
     import cv2
@@ -254,17 +268,15 @@ def main(cfg: DictConfig):
         preserve_order=False,
     )
 
-    # Коннект к кластеру Ray
     ray.init(address=cfg.ray.address)
 
-    # Директории и конфиг
     setup_directories(cfg)
 
-    # Процессор и датасеты на драйвере
     preprocessor = PaliGemmaProcessor.from_pretrained(cfg.model, use_fast=True)
     train_ds, val_ds = build_datasets(cfg, preprocessor)
 
-    # Параметры для train_loop
+    val_ds = val_ds.materialize()
+
     loop_config = {
         "seed": int(cfg.seed),
         "tensorboard_dir": cfg.logging.tensorboard_dir,
@@ -275,15 +287,17 @@ def main(cfg: DictConfig):
         "log_every_n_steps": int(cfg.logging.log_every_n_steps),
         "val_every_n_steps": int(cfg.training.val_every_n_steps),
         "val_batches": int(cfg.training.val_batches),
-        "save_every_n_epochs": int(cfg.checkpointing.save_every_n_epochs),
         "steps_per_epoch_hint": int(getattr(cfg.training, "steps_per_epoch_hint", 1000)),
         "mixed_precision": cfg.get("mixed_precision", "bf16"),
         "lora": OmegaConf.to_container(cfg.lora, resolve=True),
         "optimizer": OmegaConf.to_container(cfg.optimizer, resolve=True),
         "scheduler": OmegaConf.to_container(cfg.scheduler, resolve=True),
+        "start_with_checkpoint": cfg.checkpointing.get("start_with_checkpoint", ""),
+        "save_every_n_steps": int(cfg.checkpointing.save_every_n_steps),
     }
 
-    # TorchTrainer вместо AccelerateTrainer
+    run_name = getattr(cfg.checkpointing, "run_name", "default_run_name")
+
     trainer = TorchTrainer(
         train_loop_per_worker=train_loop,
         train_loop_config=loop_config,
@@ -294,12 +308,12 @@ def main(cfg: DictConfig):
         ),
         run_config=RunConfig(
             storage_path=cfg.checkpointing.checkpoint_dir,
+            name=run_name,
             checkpoint_config=CheckpointConfig(
                 num_to_keep=int(cfg.checkpointing.num_to_keep)
             ),
         ),
         datasets={"train": train_ds, "val": val_ds},
-        # Сплитим только train (валидацию не сплитим)
         dataset_config=train.DataConfig(datasets_to_split=["train"]),
     )
 
