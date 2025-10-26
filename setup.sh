@@ -26,7 +26,7 @@ pip install tqdm
 
 pip install flash-attn --no-build-isolation
 
-pip install -U "ray[default, data]"
+pip install -U "ray[default, data, train]"
 
 pip install hydra-core --upgrade
 
@@ -38,4 +38,7 @@ mypy --install-types --non-interactive
 
 pip install pylint
 
-pip install albumentations
+pip install hydra-joblib-launcher --upgrade
+
+pip install tensorboard
+
