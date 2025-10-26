@@ -8,6 +8,7 @@ import yaml
 from functools import partial
 import albumentations as A
 import torch
+import traceback
 
 from typing import Optional
 from ultralytics.data.converter import coco91_to_coco80_class
@@ -261,74 +262,82 @@ class ImageAugmentationActor:
 
         for row in batch.itertuples(index=False):
 
-            transform = (
-                self.transform_train if self.is_train_mode else self.transform_val
-            )
+            try:
+                transform = (
+                    self.transform_train if self.is_train_mode else self.transform_val
+                )
 
-            transformed = transform(
-                image=row.image,
-                bboxes=row.boxes.tolist(),
-                category_id=row.category_id.tolist(),
-            )
+                transformed = transform(
+                    image=row.image,
+                    bboxes=row.boxes.tolist(),
+                    category_id=row.category_id.tolist(),
+                )
 
-            boxes = []
-            for box in transformed["bboxes"]:
-                boxes.append(ltwh2xyxy(np.array(box)).tolist())
+                boxes = []
+                for box in transformed["bboxes"]:
+                    boxes.append(ltwh2xyxy(np.array(box)).tolist())
 
-            # filtering out items with no bboxes after augmentations
-            if not boxes:
-                continue
+                # filtering out items with no bboxes after augmentations
+                if not boxes:
+                    continue
 
-            categories = list(map(int, transformed["category_id"]))
-            categories = [coco91_to_coco80_class()[int(cat) - 1] for cat in categories]
+                categories = list(map(int, transformed["category_id"]))
+                categories = [
+                    coco91_to_coco80_class()[int(cat) - 1] for cat in categories
+                ]
 
-            if self.is_train_mode:
-                boxes_order = list(range(len(boxes)))
-                np.random.shuffle(boxes_order)
-                boxes = [boxes[i] for i in boxes_order]
-                categories = [categories[i] for i in boxes_order]
+                if self.is_train_mode:
+                    boxes_order = list(range(len(boxes)))
+                    np.random.shuffle(boxes_order)
+                    boxes = [boxes[i] for i in boxes_order]
+                    categories = [categories[i] for i in boxes_order]
 
-            boxes = boxes[:total_bboxes_aug]
-            categories = categories[:total_bboxes_aug]
+                boxes = boxes[:total_bboxes_aug]
+                categories = categories[:total_bboxes_aug]
 
-            r = {
-                "image_id": [row.image_id],
-                "category_id": categories,
-                "boxes": boxes,
-                "image": transformed["image"],
-            }
+                r = {
+                    "image_id": [row.image_id],
+                    "category_id": categories,
+                    "boxes": boxes,
+                    "image": transformed["image"],
+                }
 
-            height = len(row.image)
-            width = len(row.image[0])
-            if self.is_train_mode:
-                new_boxes = ImageAugmentationActor.generate_boxes_with_iou_constraint(
-                    existing_boxes=np.stack(boxes),
-                    image_width=width,
-                    image_height=height,
-                    num_boxes=max(0, total_bboxes_aug - len(boxes)),
-                ).tolist()
+                height = len(row.image)
+                width = len(row.image[0])
+                if self.is_train_mode:
+                    new_boxes = (
+                        ImageAugmentationActor.generate_boxes_with_iou_constraint(
+                            existing_boxes=np.stack(boxes),
+                            image_width=width,
+                            image_height=height,
+                            num_boxes=max(0, total_bboxes_aug - len(boxes)),
+                        ).tolist()
+                    )
 
-                r["gen_boxes"] = new_boxes
+                    r["gen_boxes"] = new_boxes
 
-            tokens, mask = self._build_sequence(
-                boxes=boxes,
-                classes=categories,
-                width=width,
-                height=height,
-                gen_boxes=r["gen_boxes"] if "gen_boxes" in r else None,
-            )
+                tokens, mask = self._build_sequence(
+                    boxes=boxes,
+                    classes=categories,
+                    width=width,
+                    height=height,
+                    gen_boxes=r["gen_boxes"] if "gen_boxes" in r else None,
+                )
 
-            if self.is_train_mode:
-                assert len(tokens) == 255, f"{len(tokens)}"
-                assert len(mask) == 255, f"{len(mask)}"
+                if self.is_train_mode:
+                    assert len(tokens) == 255, f"{len(tokens)}"
+                    assert len(mask) == 255, f"{len(mask)}"
 
-            r["tokens"] = tokens
-            r["mask"] = mask
+                r["tokens"] = tokens
+                r["mask"] = mask
 
-            results.append(r)
+                results.append(r)
+            except Exception:
+                print(f"A problem occurred while augmenting image_id {row.image_id}.")
+                traceback.print_exc()
 
-        if not results:
-            return {}
+            if not results:
+                return {}
 
         return {key: [x[key] for x in results] for key in results[0]}
 
@@ -372,9 +381,7 @@ class PreprocessActor:
         return result_batch
 
 
-def get_train_ds(
-    json_annotations_path, images_dir, preprocessor, world_size, rank, limit=None
-):
+def get_train_ds(json_annotations_path, images_dir, preprocessor, limit=None):
 
     with open(json_annotations_path, "r") as f:
         coco2017 = json.load(f)
@@ -390,24 +397,14 @@ def get_train_ds(
         ]
     )
 
-    annotations = annotations.map_batches(
-        select_by_rank,
-        fn_kwargs={"world_size": world_size, "rank": rank},
-        batch_size=64,
-        batch_format="pandas",
-        concurrency=1,
-        num_cpus=1,
-    )
-
-    annotations = (
-        annotations.groupby("image_id").map_groups(process_group,
-                                                   batch_format="pandas",
-                                                   concurrency=1,
-                                                   num_cpus=1).random_shuffle().materialize()
+    annotations = annotations.groupby("image_id").map_groups(
+        process_group, batch_format="pandas", concurrency=1, num_cpus=1
     )
 
     if limit is not None:
         annotations = annotations.limit(limit)
+
+    annotations = annotations.materialize()
 
     annotations = annotations.map_batches(
         load_images_safe,
@@ -431,7 +428,7 @@ def get_train_ds(
         PreprocessActor,
         fn_constructor_kwargs={"is_train_mode": True, "preprocessor": preprocessor},
         batch_format="pandas",
-        batch_size=16,
+        batch_size=8,
         concurrency=1,
         num_cpus=1,
     )
@@ -439,7 +436,7 @@ def get_train_ds(
     return annotations
 
 
-def get_val_ds(json_annotations_path, images_dir, preprocessor):
+def get_val_ds(json_annotations_path, images_dir, preprocessor, limit=1000):
 
     with open(json_annotations_path, "r") as f:
         coco2017 = json.load(f)
@@ -455,11 +452,12 @@ def get_val_ds(json_annotations_path, images_dir, preprocessor):
         ]
     )
 
-    annotations = (
-        annotations.groupby("image_id")
-        .map_groups(process_group, batch_format="pandas", concurrency=1, num_cpus=1)
-        # .materialize()
+    annotations = annotations.groupby("image_id").map_groups(
+        process_group, batch_format="pandas", concurrency=1, num_cpus=1
     )
+
+    if limit is not None:
+        annotations = annotations.limit(limit)
 
     annotations = annotations.map_batches(
         load_images_safe,
