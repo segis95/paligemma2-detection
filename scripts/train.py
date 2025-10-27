@@ -76,11 +76,7 @@ def validate(model, val_dataset, accelerator: Accelerator, cfg: DictConfig):
                 batch = batch_to_device(batch, accelerator.device)
 
                 # Forward pass
-                outputs = model(
-                    input_ids=batch["input_ids"],
-                    attention_mask=batch["attention_mask"],
-                    labels=batch["input_ids"],
-                )
+                outputs = model(**batch)
 
                 total_loss += outputs.loss.item()
                 num_batches += 1
@@ -93,19 +89,19 @@ def validate(model, val_dataset, accelerator: Accelerator, cfg: DictConfig):
 
 
 def save_checkpoint(
-        model,
-        optimizer,
-        scheduler,
-        epoch,
-        global_step,
-        cfg: DictConfig,
-        accelerator: Accelerator,
+    model,
+    optimizer,
+    scheduler,
+    epoch,
+    global_step,
+    cfg: DictConfig,
+    accelerator: Accelerator,
 ):
     """Save checkpoint"""
     if accelerator.is_main_process:
         checkpoint_path = (
-                Path(cfg.checkpointing.checkpoint_dir)
-                / f"checkpoint_epoch_{epoch}_step_{global_step}"
+            Path(cfg.checkpointing.checkpoint_dir)
+            / f"checkpoint_epoch_{epoch}_step_{global_step}"
         )
         checkpoint_path.mkdir(parents=True, exist_ok=True)
 
@@ -129,7 +125,8 @@ def save_checkpoint(
 
 @hydra.main(config_path="../configs", config_name="train", version_base=None)
 def main(cfg: DictConfig):
-    torch.set_num_threads(1);
+
+    torch.set_num_threads(1)
     torch.set_num_interop_threads(1)
 
     from ray.data import ExecutionOptions, ExecutionResources
@@ -143,9 +140,17 @@ def main(cfg: DictConfig):
         preserve_order=False,
     )
 
-    ray.init(address="auto", runtime_env={
-        "env_vars": {"OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1", "MKL_NUM_THREADS": "1",
-                     "NUMEXPR_MAX_THREADS": "1"}})
+    ray.init(
+        address="auto",
+        runtime_env={
+            "env_vars": {
+                "OMP_NUM_THREADS": "1",
+                "OPENBLAS_NUM_THREADS": "1",
+                "MKL_NUM_THREADS": "1",
+                "NUMEXPR_MAX_THREADS": "1",
+            }
+        },
+    )
 
     # Print config
     print(OmegaConf.to_yaml(cfg))
@@ -206,9 +211,9 @@ def main(cfg: DictConfig):
     global_step = 0
 
     for epoch in range(cfg.training.num_epochs):
-        accelerator.print(f"\n{'=' * 50}")
+        accelerator.print(f"\n{'='*50}")
         accelerator.print(f"Epoch {epoch + 1}/{cfg.training.num_epochs}")
-        accelerator.print(f"{'=' * 50}")
+        accelerator.print(f"{'='*50}")
 
         # Create fresh dataset for this epoch
         train_dataset = make_train_dataset(
@@ -238,11 +243,7 @@ def main(cfg: DictConfig):
                 batch = batch_to_device(batch, accelerator.device)
 
                 # Forward pass
-                outputs = model(
-                    input_ids=batch["input_ids"],
-                    attention_mask=batch["attention_mask"],
-                    labels=batch["input_ids"],
-                )
+                outputs = model(**batch)
 
                 loss = outputs.loss
 
@@ -276,8 +277,8 @@ def main(cfg: DictConfig):
 
                 # Log to TensorBoard
                 if (
-                        global_step % cfg.logging.log_every_n_steps == 0
-                        and accelerator.is_main_process
+                    global_step % cfg.logging.log_every_n_steps == 0
+                    and accelerator.is_main_process
                 ):
                     writer.add_scalar("train/loss", loss.item(), global_step)
                     writer.add_scalar(
