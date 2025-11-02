@@ -1,16 +1,13 @@
-import ray
 import json
+import traceback
+from typing import Optional
+
 import numpy as np
-import pandas as pd
-from pathlib import Path
 from PIL import Image
-import yaml
-from functools import partial
 import albumentations as A
 import torch
-import traceback
+import ray
 
-from typing import Optional
 from ultralytics.data.converter import coco91_to_coco80_class
 from ultralytics.utils.ops import ltwh2xyxy
 from ultralytics.utils.plotting import Annotator
@@ -410,7 +407,7 @@ def get_train_ds(json_annotations_path, images_dir, preprocessor, limit=None):
         load_images_safe,
         fn_kwargs={"images_dir": images_dir, "is_train_mode": True},
         batch_format="pandas",
-        batch_size=64,
+        batch_size=256,
         concurrency=1,
         num_cpus=1,
     )
@@ -419,7 +416,7 @@ def get_train_ds(json_annotations_path, images_dir, preprocessor, limit=None):
         ImageAugmentationActor,
         fn_constructor_kwargs={"is_train_mode": True},
         batch_format="pandas",
-        batch_size=32,
+        batch_size=128,
         concurrency=1,
         num_cpus=1,
     )
@@ -428,7 +425,7 @@ def get_train_ds(json_annotations_path, images_dir, preprocessor, limit=None):
         PreprocessActor,
         fn_constructor_kwargs={"is_train_mode": True, "preprocessor": preprocessor},
         batch_format="pandas",
-        batch_size=8,
+        batch_size=64,
         concurrency=1,
         num_cpus=1,
     )
@@ -462,7 +459,7 @@ def get_val_ds(json_annotations_path, images_dir, preprocessor, limit=1000):
     annotations = annotations.map_batches(
         load_images_safe,
         fn_kwargs={"images_dir": images_dir, "is_train_mode": False},
-        batch_size=32,
+        batch_size=256,
         batch_format="pandas",
         concurrency=1,
         num_cpus=1,
@@ -472,7 +469,7 @@ def get_val_ds(json_annotations_path, images_dir, preprocessor, limit=1000):
         ImageAugmentationActor,
         fn_constructor_kwargs={"is_train_mode": False},
         batch_format="pandas",
-        batch_size=32,
+        batch_size=128,
         concurrency=1,
         num_cpus=1,
     )
@@ -481,7 +478,7 @@ def get_val_ds(json_annotations_path, images_dir, preprocessor, limit=1000):
         PreprocessActor,
         fn_constructor_kwargs={"is_train_mode": False, "preprocessor": preprocessor},
         batch_format="pandas",
-        batch_size=32,
+        batch_size=64,
         concurrency=1,
         num_cpus=1,
     )

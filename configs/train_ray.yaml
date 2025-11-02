@@ -20,11 +20,11 @@ checkpointing:
 
 ray:
   address: auto
-  num_workers: 2
+  num_workers: 4
   cpus_per_worker: 2
   driver_cpu: 2
   driver_gpu: 0
-  object_store_mem: 80000000000  # ~10 GB
+  object_store_mem: 80000000000 # 80 Gb
 
 
 # Data configuration

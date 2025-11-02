@@ -1,13 +1,13 @@
 import os
-import json
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, Tuple, Optional
+from typing import Any, Dict, Tuple
 
 import torch
 import hydra
 from omegaconf import DictConfig, OmegaConf
 from hydra.utils import instantiate
+import cv2
 
 import ray
 import ray.train as train
@@ -20,17 +20,23 @@ from peft import get_peft_model, PeftModel
 
 from data_pipeline import get_train_ds, get_val_ds
 
-# Limit threading
-os.environ["OMP_NUM_THREADS"] = "8"
+
+cv2.setNumThreads(0)
+torch.set_num_threads(3)
+torch.set_num_interop_threads(2)
+
+os.environ["OMP_NUM_THREADS"] = "4"
+os.environ["NCCL_TIMEOUT"] = "7200000"
+os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = "20000"
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["GRPC_NUM_THREADS"] = "1"
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+os.environ["RAYON_NUM_THREADS"] = "1"
 
-os.environ["RAYON_NUM_THREADS"] = "4"
-os.environ["OPENBLAS_NUM_THREADS"] = "4"
-os.environ["MKL_NUM_THREADS"] = "4"
-os.environ["NUMEXPR_MAX_THREADS"] = "4"
-
-# os.environ["PYTORCH_NUM_THREADS"] = "1" # usually inherits OMP
 os.environ["RAY_gcs_server_rpc_server_thread_num"] = "2"
 os.environ["RAY_gcs_server_rpc_client_thread_num"] = "2"
 os.environ["RAY_num_server_call_thread"] = "2"
@@ -363,11 +369,7 @@ def main(cfg: DictConfig):
 
     from ray.data import ExecutionOptions, ExecutionResources
 
-    import cv2
-
-    cv2.setNumThreads(0)
-    torch.set_num_threads(1)
-    torch.set_num_interop_threads(1)
+    ray.init(address=cfg.ray.address)
 
     ctx = ray.data.DataContext.get_current()
     ctx.execution_options = ExecutionOptions(
@@ -379,8 +381,6 @@ def main(cfg: DictConfig):
         locality_with_output=True,
         preserve_order=False,
     )
-
-    ray.init(address=cfg.ray.address)
 
     setup_directories(cfg)
 
@@ -425,7 +425,7 @@ def main(cfg: DictConfig):
         scaling_config=ScalingConfig(
             num_workers=int(cfg.ray.num_workers),
             use_gpu=True,
-            resources_per_worker={"CPU": int(cfg.ray.cpus_per_worker)},
+            resources_per_worker={"CPU": int(cfg.ray.cpus_per_worker), "GPU": 1},
         ),
         run_config=RunConfig(
             storage_path=cfg.checkpointing.checkpoint_dir,
@@ -435,7 +435,9 @@ def main(cfg: DictConfig):
             ),
         ),
         datasets={"train": train_ds, "val": val_ds},
-        dataset_config=ray.train.DataConfig(datasets_to_split=["train"]),
+        dataset_config=ray.train.DataConfig(
+            datasets_to_split=["train"]
+        ),
     )
 
     result = trainer.fit()
