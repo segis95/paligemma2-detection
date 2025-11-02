@@ -423,7 +423,7 @@ class RestrictedPredictor:
 @hydra.main(
     version_base=None,
     config_path="../configs",
-    config_name="restricted_inference.yaml",
+    config_name="paligemma_structured_coco_benchmark",
 )
 def main(cfg: DictConfig):
 

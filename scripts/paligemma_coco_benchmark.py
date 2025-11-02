@@ -730,7 +730,7 @@ def run_detection(
 @hydra.main(
     version_base=None,
     config_path="../configs",
-    config_name="paligemma_coco_inference.yaml",
+    config_name="paligemma_coco_benchmark",
 )
 def main(cfg: DictConfig):
     distributed_state = PartialState()
