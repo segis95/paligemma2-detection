@@ -31,7 +31,8 @@ dependencies = [
     "pylint",
     "hydra-joblib-launcher",
     "tensorboard",
-    "ipykernel"
+    "ipykernel",
+    "gradio>=5.49.1",
 ]
 
 [build-system]
@@ -40,3 +41,7 @@ build-backend = "hatchling.build"
 
 [tool.uv]
 extra-index-url = ["https://download.pytorch.org/whl/cu125"]
+package = false
+
+[tool.hatch.build.targets.wheel]
+packages = ["inference"]

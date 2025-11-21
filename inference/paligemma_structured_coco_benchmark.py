@@ -9,7 +9,7 @@ from PIL import Image
 from peft import PeftModel
 import yaml
 from ultralytics.utils.plotting import Annotator
-from coco_detection import PaliGemmaCocoPredictor
+from inference.paligemma_coco_benchmark import PaliGemmaCocoPredictor
 from pathlib import Path
 from tqdm import tqdm
 from accelerate import PartialState
@@ -83,7 +83,7 @@ class RestrictedPredictor:
         self.new_tokens = 256
         self.noise_token = 87
 
-        with open(to_absolute_path("coco_id2class.yaml"), "r") as file:
+        with open(to_absolute_path("../assets/coco_id2class.yaml"), "r") as file:
             id2class = yaml.safe_load(file)
         self.coco_id2class = id2class["classes"]
 
