@@ -85,7 +85,7 @@ class PaliGemmaCocoPredictor:
         self.pattern = r"<loc(\d{4})><loc(\d{4})><loc(\d{4})><loc(\d{4})>([^;<]+)"
         self.loc_tokens_expected_number = 4
 
-        with open(to_absolute_path("../assets/coco_classes2id.yaml"), "r") as file:
+        with open(to_absolute_path("assets/coco_classes2id.yaml"), "r") as file:
             data = yaml.safe_load(file)
 
         self.coco_class2id = data["classes"]

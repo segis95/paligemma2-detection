@@ -55,19 +55,27 @@ if "RUN_TIMESTAMP" not in os.environ:
 class PositionBasedTokenFilter(LogitsProcessor):
     def __init__(self, prefix_len):
         self.prefix_len = prefix_len
+        self.first_class_token = 7
+        self.noise_token = 87
+        self.first_loc_token = 256000
+        self.last_loc_token = 257023
 
     def __call__(
-        self, input_ids: torch.LongTensor, scores: torch.FloatTensor
+            self, input_ids: torch.LongTensor, scores: torch.FloatTensor
     ) -> torch.FloatTensor:
+        """
+        Generating exactly 256 new tokens.
+        There are exactly 51 groups of type <locAAAA><locBBBB><locCCCC><locDDDD><unusedXX> followed by <eos> at the end.
+        """
 
         current_position = input_ids.shape[-1] - self.prefix_len
         mask = torch.full_like(scores, float("-inf"))
         if current_position == 255:
-            mask[:, 1] = 0.0
+            mask[:, 1] = 0.0  # <eos>
         elif (current_position + 1) % 5 != 0:
-            mask[:, 256000:257024] = 0.0
+            mask[:, self.first_loc_token: self.last_loc_token + 1] = 0.0
         else:
-            mask[:, 7:88] = 0.0
+            mask[:, self.first_class_token: self.noise_token + 1] = 0.0
 
         scores = scores + mask
 
@@ -83,7 +91,7 @@ class RestrictedPredictor:
         self.new_tokens = 256
         self.noise_token = 87
 
-        with open(to_absolute_path("../assets/coco_id2class.yaml"), "r") as file:
+        with open(to_absolute_path("assets/coco_id2class.yaml"), "r") as file:
             id2class = yaml.safe_load(file)
         self.coco_id2class = id2class["classes"]
 
@@ -441,6 +449,7 @@ def main(cfg: DictConfig):
         .to(distributed_state.device)
         .eval()
     )
+    model = torch.compile(model, dynamic=True)
 
     try:
         pg_predictor = RestrictedPredictor(
