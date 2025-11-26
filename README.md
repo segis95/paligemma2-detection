@@ -54,3 +54,7 @@ Configure Accelerate (GPUs, bf16): ``accelerate config``
 1. Download model from Huggingface (e.g. ``google/paligemma2-10b-pt-448`` or ``google/paligemma2-3b-pt-448``) and adapter (``https://huggingface.co/segis95/paligemma2-10b-pt-448-adapter_detection_coco``)
 2. ``uv run deploy/demo_paligemma.py --model_path /path/to/paligemma2-10b-pt-448 [--adapter_path /path/to/adapter]``
 
+## Predictions and results
+
+Prediction files for some models (COCO2017_val benchmark) are located at `assets/predictions/`. 
+The corresponding benchmark results are showcased in `assets/benchmark_results.ipynb`.
