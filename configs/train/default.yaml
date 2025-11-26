@@ -1,0 +1,50 @@
+defaults:
+  - optimizer: adamw
+  - lora: default
+  - scheduler: cosine
+  - _self_
+
+seed: 42
+model: "/path/to/models/paligemma2-10b-pt-448/"
+mixed_precision: bf16
+
+logging:
+  tensorboard_dir: /path/to/tb/runs/${now:%Y-%m-%d_%H-%M-%S}
+  log_every_n_steps: 10
+
+checkpointing:
+  start_with_checkpoint: null
+  run_name: "paligemma"
+  checkpoint_dir: /path/to/checkpoints/ray
+  save_every_n_steps: 1000
+  num_to_keep: 30
+
+ray:
+  address: auto
+  num_workers: 4
+  cpus_per_worker: 2
+  driver_cpu: 2
+  driver_gpu: 0
+  object_store_mem: 80000000000 # 80 Gb
+
+
+# Data configuration
+data:
+  json_annotations_train: "/path/to/coco/annotations/annotations/instances_train2017.json"
+  json_annotations_val: "/path/to/coco/annotations/annotations/instances_val2017.json"
+  images_dir_train: "/path/to/coco/train2017"
+  images_dir_val: "/path/to/coco/val2017"
+
+
+# Training hyperparameters
+training:
+  num_epochs: 6
+  batch_size: 2
+  prefetch_batches: 1
+  grad_accum_steps: 4
+  local_shuffle_buffer_size: 1000
+
+  # Validation settings
+  val_every_n_steps: 1000
+  val_batches: 500
+  steps_per_epoch_hint: 8000
