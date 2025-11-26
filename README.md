@@ -36,11 +36,10 @@ Configure Accelerate (GPUs, bf16): ``accelerate config``
 
 ## Training
 
-1. Configure Accelerate (GPUs, bf16): ``accelerate config``
-2. Set up Ray: ``ray start --head --dashboard-host=0.0.0.0 --disable-usage-stats [--object-store-memory=20GiB --temp-dir /path/to/ray_tmp --system-config='{"object_spilling_config":"{"type":"filesystem","params":{"directory_path":"/path/to/spill"}}"}']``
-3. Configure ``configs/train/default.yaml``
-4. ``uv run --module accelerate.commands.launch training/train.py``
-5. (Optional) Set up Tensorboard: ``tensorboard --logdir tb_dir_from_train_config``
+1. Set up Ray: ``ray start --head --dashboard-host=0.0.0.0 --disable-usage-stats [--object-store-memory=20GiB --temp-dir /path/to/ray_tmp --system-config='{"object_spilling_config":"{"type":"filesystem","params":{"directory_path":"/path/to/spill"}}"}']``
+2. Configure ``configs/train/default.yaml``
+3. ``uv run training/train.py``
+4. (Optional) ``tensorboard --logdir tb_dir_from_train_config``
 
 
 ## Demos
@@ -57,4 +56,5 @@ Configure Accelerate (GPUs, bf16): ``accelerate config``
 ## Predictions and results
 
 Prediction files for some models (COCO2017_val benchmark) are located at `assets/predictions/`. 
+To get these files run `git lfs pull`.
 The corresponding benchmark results are showcased in `assets/benchmark_results.ipynb`.

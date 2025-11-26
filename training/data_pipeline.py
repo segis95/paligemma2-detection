@@ -339,9 +339,10 @@ class ImageAugmentationActor:
 
 
 class PreprocessActor:
-    def __init__(self, preprocessor, is_train_mode):
+    def __init__(self, preprocessor, is_train_mode, image_tokens_number):
         self.preprocessor = preprocessor
         self.is_train_mode = is_train_mode
+        self.image_tokens_number = image_tokens_number
 
     def __call__(self, batch):
         prompt_instruct = "<image>detect all classes\n"
@@ -362,7 +363,7 @@ class PreprocessActor:
             images=images,
             suffix=suffixes,
             padding="max_length",
-            max_length=1285,
+            max_length=self.image_tokens_number + 261, #1285,
             return_tensors="pt",
         )
 
@@ -375,7 +376,7 @@ class PreprocessActor:
         return result_batch
 
 
-def get_train_ds(json_annotations_path, images_dir, preprocessor, limit=None):
+def get_train_ds(json_annotations_path, images_dir, preprocessor, image_tokens_number, limit=None):
 
     with open(json_annotations_path, "r") as f:
         coco2017 = json.load(f)
@@ -420,7 +421,9 @@ def get_train_ds(json_annotations_path, images_dir, preprocessor, limit=None):
 
     annotations = annotations.map_batches(
         PreprocessActor,
-        fn_constructor_kwargs={"is_train_mode": True, "preprocessor": preprocessor},
+        fn_constructor_kwargs={"is_train_mode": True,
+                               "preprocessor": preprocessor,
+                               "image_tokens_number": image_tokens_number},
         batch_format="pandas",
         batch_size=64,
         concurrency=1,
@@ -430,7 +433,7 @@ def get_train_ds(json_annotations_path, images_dir, preprocessor, limit=None):
     return annotations
 
 
-def get_val_ds(json_annotations_path, images_dir, preprocessor, limit=1000):
+def get_val_ds(json_annotations_path, images_dir, preprocessor, image_tokens_number, limit=1000):
 
     with open(json_annotations_path, "r") as f:
         coco2017 = json.load(f)
@@ -473,7 +476,9 @@ def get_val_ds(json_annotations_path, images_dir, preprocessor, limit=1000):
 
     annotations = annotations.map_batches(
         PreprocessActor,
-        fn_constructor_kwargs={"is_train_mode": False, "preprocessor": preprocessor},
+        fn_constructor_kwargs={"is_train_mode": False,
+                               "preprocessor": preprocessor,
+                               "image_tokens_number": image_tokens_number},
         batch_format="pandas",
         batch_size=64,
         concurrency=1,

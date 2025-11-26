@@ -51,11 +51,13 @@ def build_datasets(cfg: DictConfig, preprocessor):
         cfg.data.json_annotations_train,
         Path(cfg.data.images_dir_train),
         preprocessor,
+        cfg.image_tokens_number,
     )
     val_ds = get_val_ds(
         cfg.data.json_annotations_val,
         Path(cfg.data.images_dir_val),
         preprocessor,
+        cfg.image_tokens_number,
     )
     return train_ds, val_ds
 
@@ -374,6 +376,7 @@ def main(cfg: DictConfig):
                      "deploy/",
                      "assets/",
                      "docs/",
+                     ".git/"
                  ]
              }
     )
