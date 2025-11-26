@@ -32,6 +32,7 @@ dependencies = [
     "hydra-joblib-launcher",
     "tensorboard",
     "ipykernel",
+    "albumentations",
     "gradio>=5.49.1",
 ]
 
