@@ -1,8 +1,10 @@
+import argparse
 import gradio as gr
 import cv2
 import numpy as np
-from ultralytics.utils.plotting import Annotator, colors
 from PIL import Image
+from ultralytics.utils.plotting import Annotator, colors
+from ultralytics import YOLO
 from yolo_triton_client import TritonYOLOInference
 
 
@@ -125,17 +127,27 @@ def create_gradio_app(triton_client):
 
     return app
 
+def parse_arguments():
+    """Parse command line arguments for Paligemma demo."""
+    parser = argparse.ArgumentParser(description='Launch YOLO Gradio Demo')
 
-if __name__ == "__main__":
-    from ultralytics import YOLO
-    import numpy as np
-    from PIL import Image
+    parser.add_argument(
+        '--url',
+        type=str,
+        default="localhost:8000",
+        help='Triton Inference Server URL (optional)'
+    )
+
+    return parser.parse_args()
+
+def main():
+    args = parse_arguments()
 
     model = YOLO("yolo11x.pt")
     model.predict(Image.fromarray(np.zeros((224, 224, 3), dtype=np.uint8)))
 
     triton_client = TritonYOLOInference(
-        url="localhost:8000",
+        url=args.url,
         model_name="yolo",
         preprocess_fn=model.predictor.preprocess,
         conf_threshold=0.25,
@@ -149,3 +161,6 @@ if __name__ == "__main__":
         server_name="0.0.0.0",
         server_port=7860
     )
+
+if __name__ == "__main__":
+    main()

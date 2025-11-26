@@ -2,6 +2,7 @@ from pathlib import Path
 import tempfile
 from typing import Callable
 from functools import partial
+import argparse
 
 from PIL import Image
 import torch
@@ -41,6 +42,7 @@ class PaligemmaGradioDemo:
             # self.model = PeftModel.from_pretrained(self.model, adapter_path)
 
         self.model.eval()
+        # self.model = torch.compile(self.model, dynamic=True)
 
         self.processor = PaliGemmaProcessor.from_pretrained(model_path, use_fast=True)
 
@@ -63,7 +65,7 @@ class PaligemmaGradioDemo:
         self.detect_coco_btn = gr.Button("Detect COCO")
         self.coco_mode_radio = gr.Radio(label="COCO detection mode",
                                 choices=["Open class", "Closed set"] if self.adapter_path else ["Open class"],
-                                value="Open class")
+                                value="Closed set" if self.adapter_path else "Open class")
 
         self.slider_classes = gr.Slider(
                 label="Classes per call",
@@ -128,6 +130,21 @@ class PaligemmaGradioDemo:
                 input_image.size,
             )
 
+            # r1 = self.cs_predictor._parse_predictions(
+            #         [list(
+            #             zip([self.processor.decode(x) for x in new_tokens_generated],
+            #                 [prob_distribution_generated[i, new_tokens_generated[i]]
+            #                  for i in range(len(new_tokens_generated))]
+            #                 )
+            #             )],
+            #         [input_image.size]
+            # )
+            #
+            # if self.apply_adapter:
+            #     for x1, y1, x2, y2, score, cls in r1[0]:
+            #         if cls != 80:
+            #             r.append([x1, y1, x2, y2, float(score), self.cs_predictor.coco_id2class[cls]])
+
             if apply_nms:
                 r = nms_callable(r)
 
@@ -170,6 +187,7 @@ class PaligemmaGradioDemo:
                 self.model.disable_adapters()
 
             self.model.eval()
+            # self.model = torch.compile(self.model, dynamic=True)
 
     def build_interface(self):
         with gr.Blocks() as demo:
@@ -213,7 +231,7 @@ class PaligemmaGradioDemo:
             self.apply_adapter.change(
                 fn=lambda checked: gr.update(
                     choices=["Open class", "Closed set"] if checked else ["Open class"],
-                    value="Open class",
+                    value="Closed set" if checked else "Open class",
                     interactive=True
                 ),
                 inputs=self.apply_adapter,
@@ -233,16 +251,36 @@ class PaligemmaGradioDemo:
 
         return demo
 
+def parse_arguments():
+    """Parse command line arguments for Paligemma demo."""
+    parser = argparse.ArgumentParser(description='Launch Paligemma Gradio Demo')
+
+    parser.add_argument(
+        '--model_path',
+        type=str,
+        required=True,
+        help='Path to the Paligemma model directory'
+    )
+
+    parser.add_argument(
+        '--adapter_path',
+        type=str,
+        default=None,
+        help='Path to the adapter directory (optional)'
+    )
+
+    return parser.parse_args()
+
 
 def main():
-    model_path = "/mnt/d/Sergey/ML/models/paligemma_models/paligemma2-10b-pt-448"
-    adapter_path = '/mnt/d/Sergey/ML/models/paligemma_models/adapter_last'
-    # adapter_path = None
-    demo_instance = PaligemmaGradioDemo(model_path, adapter_path)
+    args = parse_arguments()
+
+    demo_instance = PaligemmaGradioDemo(args.model_path, args.adapter_path)
     interface = demo_instance.build_interface()
     interface.launch()
 
-if __name__ == "__main__":
+
+if __name__ == '__main__':
     main()
 
 
