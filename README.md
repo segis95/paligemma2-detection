@@ -15,7 +15,7 @@ This repository contains implementations for research work into PaliGemma-2 obje
 | Paligemma-2, open class mode (best)                                                                                 | 0.239                            |
 | Paligemma-2, closed set ([fine-tuned](https://huggingface.co/segis95/paligemma2-10b-pt-448-adapter_detection_coco)) | 0.296                            |
 
-![3b-448 models](../assets/images/haystacks_demo.webp)
+![3b-448 models](../assets/images/haystacks_demo.png)
 
 ## Install Dependencies
 
