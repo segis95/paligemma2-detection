@@ -8,3 +8,10 @@ assets/predictions/paligemma2-10b-pt-448-finetuned_closed_set.json filter=lfs di
 assets/predictions/paligemma2-10b-pt-224_classes_per_call_1.json filter=lfs diff=lfs merge=lfs -text
 assets/predictions/yolo_v11x.json filter=lfs diff=lfs merge=lfs -text
 assets/instances_val2017.json filter=lfs diff=lfs merge=lfs -text
+assets/images/resolution_sizes_distr_4.png filter=lfs diff=lfs merge=lfs -text
+assets/images/mix_vs_pt_10b.png filter=lfs diff=lfs merge=lfs -text
+assets/images/mix_vs_pt_3b.png filter=lfs diff=lfs merge=lfs -text
+assets/images/mix_vs_pt_verbosity.png filter=lfs diff=lfs merge=lfs -text
+assets/images/n_objects_dist_mix.png filter=lfs diff=lfs merge=lfs -text
+assets/images/n_objects_dist_pt.png filter=lfs diff=lfs merge=lfs -text
+assets/images/resolution_sizes_distr_1.png filter=lfs diff=lfs merge=lfs -text
