@@ -68,8 +68,8 @@ whereas "the mix models give a quick idea of the performance one would get when 
 
 ![10b-448 models verbosity](../assets/images/mix_vs_pt_verbosity.png)
 
-<img src="../assets/images/n_objects_dist_mix.png" alt="Number of objects distribution, 10b-mix-448" width="200">
-<img src="../assets/images/n_objects_dist_pt.png" alt="Number of objects distribution, 10b-pt-448" width="200">
+<img src="../assets/images/n_objects_dist_mix.png" alt="Number of objects distribution, 10b-mix-448" width="100">
+<img src="../assets/images/n_objects_dist_pt.png" alt="Number of objects distribution, 10b-pt-448" width="100">
 
 
 ### Classes_per_call
@@ -81,7 +81,7 @@ Model is usually pretty sure about the predicted classes as the 10th quantile is
 
 ### Input Image Resolution
 
-<img src="../assets/images/resolution_sizes_distr_1.png" alt="classes_per_call=1" width="200">
-<img src="../assets/images/resolution_sizes_distr_4.png" alt="classes_per_call=4" width="200">
+<img src="../assets/images/resolution_sizes_distr_1.png" alt="classes_per_call=1" width="100">
+<img src="../assets/images/resolution_sizes_distr_4.png" alt="classes_per_call=4" width="100">
 
 
