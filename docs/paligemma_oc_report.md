@@ -97,8 +97,10 @@ Model is usually pretty sure about the predicted classes as the 10th quantile is
 </div>
 
 - As `classes_per_call` approaches 8, the `10b-pt-224` produces too many false positives (especially smaller objects), which degrades the metric
-  - this could be because low resolution makes it difficult for model to distinguish between small objects
+  - This could be because low resolution makes it difficult for model to distinguish between small objects types
 - `10b-pt-896` detects uniformly more smaller objects than `10b-pt-448` without significant performance degradation
+- The peak in detection size of 640 reflects another common behavior of Paligemma-2 models: when the number of objects of 
+a certain type is significant, models tend to output the whole image as bounding box instead of detecting every single object of that type
 
 ### Model Size
 
