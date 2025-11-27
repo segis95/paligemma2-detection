@@ -73,7 +73,16 @@ whereas "the mix models give a quick idea of the performance one would get when 
   <img src="../assets/images/n_objects_dist_pt.png" alt="Number of objects distribution, 10b-pt-448" width="500">
 </div>
 
+- `mix` models appear to be more verbose than `pt`
+- interestingly the detection quality of `pt` models peaks at `classes_per_call=1` whereas for `mix` models it peaks at `classes_per_call=10`
+
 ### Classes_per_call
+
+- As `classes_per_call` increases, there is a tendency for model verbosity to grow
+  - Longer text input is naturally correlated with longer output, so more detections are generated for more input classes
+- Every single detection call with a large `classes_per_call` becomes a more difficult prompt for model to process, which leads to an increased risk of false positives and undetected objects
+- With a large `classes_per_call` a lot of predictions are duplicated (the spread before/after NMS explodes)
+
 
 
 ### Scores distribution

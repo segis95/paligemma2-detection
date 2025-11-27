@@ -15,3 +15,5 @@ assets/images/mix_vs_pt_verbosity.png filter=lfs diff=lfs merge=lfs -text
 assets/images/n_objects_dist_mix.png filter=lfs diff=lfs merge=lfs -text
 assets/images/n_objects_dist_pt.png filter=lfs diff=lfs merge=lfs -text
 assets/images/resolution_sizes_distr_1.png filter=lfs diff=lfs merge=lfs -text
+assets/images/haystacks_demo.webp filter=lfs diff=lfs merge=lfs -text
+assets/images/haystacks_demo.png filter=lfs diff=lfs merge=lfs -text
