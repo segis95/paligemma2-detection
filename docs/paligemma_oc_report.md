@@ -80,7 +80,7 @@ whereas "the mix models give a quick idea of the performance one would get when 
 
 - As the value of `classes_per_call` increases, there is a tendency for model verbosity to grow
   - Longer text input is naturally correlated with longer output, so more detections are generated for more input classes
-- Every single detection call with a large `classes_per_call` becomes a more difficult prompt for model to process, which leads to an increased risk of false positives and undetected objects
+- Every single detection call with a large `classes_per_call` becomes more difficult for model to process, which leads to an increased risk of false positives and undetected objects
 - With a large `classes_per_call` a lot of predictions are duplicated (the spread before/after NMS explodes)
 
 ### Scores distribution
