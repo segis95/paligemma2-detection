@@ -96,7 +96,7 @@ Model is usually pretty sure about the predicted classes as the 10th quantile is
   <img src="../assets/images/resolution_sizes_distr_4.png" alt="classes_per_call=4" width="500">
 </div>
 
-- As `classes_per_call` to 8, the `10b-pt-224` produces too many false positives (especially smaller objects), which degrades the metric
+- As `classes_per_call` approaches 8, the `10b-pt-224` produces too many false positives (especially smaller objects), which degrades the metric
   - this could be because low resolution makes it difficult for model to distinguish between small objects
 - `10b-pt-896` detects uniformly more smaller objects than `10b-pt-448` without significant performance degradation
 
