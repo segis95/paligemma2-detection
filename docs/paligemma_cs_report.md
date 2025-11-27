@@ -32,9 +32,9 @@ In this work, we use 81 of them: tokens numbered 7 through 87 (corresponding to 
 
 The structure of the model's input and output is as follows:
 
-- The input text prompt is fixed: detect all classes\n 
+- The input text prompt is fixed: `detect all classes\n`
 - The model generates 256 new tokens 
-- The last token of the 256 is <eos>
+- The last token of the 256 is `<eos>`
 - The first 255 tokens are divided into 51 groups of 5 tokens each 
 - Each group has the structure `<locAAAA><locBBBB><locCCCC><locDDDD><unusedXX>`, where the first 4 tokens encode the bounding box as before, 
 and the last token matches one of the 81 selected <unused> tokens above
@@ -72,6 +72,8 @@ Training employs the AdamW optimizer along with a cosine learning rate scheduler
 The data pipeline is implemented with Ray Data, while distributed training uses Ray Train, which internally leverages the Accelerate library.
 
 ![learning curve](../assets/images/learning_curve.png)
+
+![validation](../assets/images/validation.png)
 
 ## Results
 
