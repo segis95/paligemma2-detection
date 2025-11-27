@@ -78,12 +78,10 @@ whereas "the mix models give a quick idea of the performance one would get when 
 
 ### Classes_per_call
 
-- As `classes_per_call` increases, there is a tendency for model verbosity to grow
+- As the value of `classes_per_call` increases, there is a tendency for model verbosity to grow
   - Longer text input is naturally correlated with longer output, so more detections are generated for more input classes
 - Every single detection call with a large `classes_per_call` becomes a more difficult prompt for model to process, which leads to an increased risk of false positives and undetected objects
 - With a large `classes_per_call` a lot of predictions are duplicated (the spread before/after NMS explodes)
-
-
 
 ### Scores distribution
 
@@ -91,8 +89,21 @@ Model is usually pretty sure about the predicted classes as the 10th quantile is
 
 ### Input Image Resolution
 
+![input resolution table](../assets/images/input_resolution_table.png)
+
 <div style="display: flex;">
   <img src="../assets/images/resolution_sizes_distr_1.png" alt="classes_per_call=1" width="500">
   <img src="../assets/images/resolution_sizes_distr_4.png" alt="classes_per_call=4" width="500">
 </div>
 
+- As `classes_per_call` to 8, the `10b-pt-224` produces too many false positives (especially smaller objects), which degrades the metric
+  - this could be because low resolution makes it difficult for model to distinguish between small objects
+- `10b-pt-896` detects uniformly more smaller objects than `10b-pt-448` without significant performance degradation
+
+### Model Size
+
+![model size table](../assets/images/model_size_table.png)
+
+- `28B-pt-448` model performs poorly on object detection task
+  - According to the [Paligemma-2 paper](https://arxiv.org/pdf/2412.03555), "a possible factor related to the relatively worse transferability of PaliGemma 2 28B is that the underlying Gemma 2 27B model is trained from scratch, as opposed to the 2B and 9B models, which are distilled"
+- In terms of open class object detection capabilities the `10b-448` model performs slightly better than the `3b-448` model

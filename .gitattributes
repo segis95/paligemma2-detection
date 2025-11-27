@@ -17,3 +17,5 @@ assets/images/n_objects_dist_pt.png filter=lfs diff=lfs merge=lfs -text
 assets/images/resolution_sizes_distr_1.png filter=lfs diff=lfs merge=lfs -text
 assets/images/haystacks_demo.webp filter=lfs diff=lfs merge=lfs -text
 assets/images/haystacks_demo.png filter=lfs diff=lfs merge=lfs -text
+assets/images/model_size_table.png filter=lfs diff=lfs merge=lfs -text
+assets/images/input_resolution_table.png filter=lfs diff=lfs merge=lfs -text
