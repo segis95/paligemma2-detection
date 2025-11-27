@@ -19,3 +19,7 @@ assets/images/haystacks_demo.webp filter=lfs diff=lfs merge=lfs -text
 assets/images/haystacks_demo.png filter=lfs diff=lfs merge=lfs -text
 assets/images/model_size_table.png filter=lfs diff=lfs merge=lfs -text
 assets/images/input_resolution_table.png filter=lfs diff=lfs merge=lfs -text
+assets/images/cs_objnum_distr.png filter=lfs diff=lfs merge=lfs -text
+assets/images/cs_sizes_distr.png filter=lfs diff=lfs merge=lfs -text
+assets/images/learning_curve.png filter=lfs diff=lfs merge=lfs -text
+assets/images/score_cs_distr.png filter=lfs diff=lfs merge=lfs -text
