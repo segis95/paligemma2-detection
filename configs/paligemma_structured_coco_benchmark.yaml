@@ -1,0 +1,19 @@
+model:
+  base: "/path/to/models/paligemma2-10b-pt-448"
+  adapter: /path/to/adapter
+
+coco:
+  path_to_images: "/path/to/coco/val2017/"
+  json_annotations: "/path/to/coco/annotations/annotations/instances_val2017.json"
+
+processing:
+  batch_size: 10
+
+hydra:
+  job:
+    chdir: true
+  run:
+    dir: ./outputs/${oc.env:RUN_TIMESTAMP}
+  sweep:
+    dir: ./multirun/${oc.env:RUN_TIMESTAMP}
+    subdir: ${hydra.job.num}

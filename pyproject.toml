@@ -1,0 +1,48 @@
+[project]
+name = "paligemma-detection"
+version = "0.1.0"
+description = "Paligemma detection project environment setup"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy",
+    "pandas",
+    "matplotlib",
+    "ipython",
+    "jupyter",
+    "torch",
+    "torchvision",
+    "torchaudio",
+    "ultralytics",
+    "tritonclient[all]",
+    "opencv-python",
+    "scikit-learn",
+    "scipy",
+    "transformers",
+    "accelerate",
+    "peft",
+    "datasets",
+    "evaluate",
+    "pycocotools",
+    "tqdm",
+    "ray[default,data,train]",
+    "hydra-core",
+    "black",
+    "mypy",
+    "pylint",
+    "hydra-joblib-launcher",
+    "tensorboard",
+    "ipykernel",
+    "albumentations",
+    "gradio>=5.49.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+extra-index-url = ["https://download.pytorch.org/whl/cu125"]
+package = false
+
+[tool.hatch.build.targets.wheel]
+packages = ["inference"]
