@@ -2,6 +2,8 @@
 
 This repository contains implementations for research work into PaliGemma-2 object detection capabilities.
 
+## [Technical Report](docs/index.md)
+
 ## Main results
 
 - Deployed a Triton Inference Server with TensorRT backend for YOLOv11x model and reproduced the official COCO2017 object detection benchmark results
@@ -16,6 +18,8 @@ This repository contains implementations for research work into PaliGemma-2 obje
 | Paligemma-2, closed set ([fine-tuned](https://huggingface.co/segis95/paligemma2-10b-pt-448-adapter_detection_coco)) | 0.296                            |
 
 ![paligemma detection example](assets/images/haystacks_demo.png)
+
+### [Detection Examples](docs/examples.md)
 
 ## Install Dependencies
 
