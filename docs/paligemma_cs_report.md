@@ -71,9 +71,9 @@ Training employs the AdamW optimizer along with a cosine learning rate scheduler
 
 The data pipeline is implemented with Ray Data, while distributed training uses Ray Train, which internally leverages the Accelerate library.
 
-![learning curve](../assets/images/learning_curve.png)
+![learning curve](images/learning_curve.png)
 
-![validation](../assets/images/validation.png)
+![validation](images/validation.png)
 
 ## Results
 
@@ -84,19 +84,19 @@ which is an improvement of more than 7 percentage points over the open-set confi
 
 ### Score distribution
 
-![Score distribution](../assets/images/score_cs_distr.png)
+![Score distribution](images/score_cs_distr.png)
 
 - Deduplicated bounding boxes exhibit a score distribution peak near zero, which may result from noise token replacement during inference
 
 ### Detections number distribution
 
-![number of detections distribution](../assets/images/cs_objnum_distr.png)
+![number of detections distribution](images/cs_objnum_distr.png)
 
 - The model tends to produce redundant predictions compared to the ground truth which most likely contribute to false positives
 
 ### Detection size distribution
 
-![Detection size distribution](../assets/images/cs_sizes_distr.png)
+![Detection size distribution](images/cs_sizes_distr.png)
 
 - A huge peak and gap relative to the ground truth near zero indicate that the model predicts a large number of unnecessary small bounding boxes, most likely contributing to false positives
   - simply filtering out all detections smaller than 15 pixels helps boost the metric value by 0.6 percentage point

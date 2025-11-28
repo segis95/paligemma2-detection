@@ -62,15 +62,15 @@ According to [official blog](https://github.com/huggingface/blog/blob/main/palig
 "pt checkpoints are meant to be fine-tuned on a downstream task and were released for that purpose",
 whereas "the mix models give a quick idea of the performance one would get when fine-tuning the pre-trained checkpoints on a downstream task".
 
-![10b-448 models](../assets/images/mix_vs_pt_10b.png)
+![10b-448 models](images/mix_vs_pt_10b.png)
 
-![3b-448 models](../assets/images/mix_vs_pt_3b.png)
+![3b-448 models](images/mix_vs_pt_3b.png)
 
-![10b-448 models verbosity](../assets/images/mix_vs_pt_verbosity.png)
+![10b-448 models verbosity](images/mix_vs_pt_verbosity.png)
 
 <div style="display: flex;">
-  <img src="../assets/images/n_objects_dist_mix.png" alt="Number of objects distribution, 10b-mix-448" width="500">
-  <img src="../assets/images/n_objects_dist_pt.png" alt="Number of objects distribution, 10b-pt-448" width="500">
+  <img src="images/n_objects_dist_mix.png" alt="Number of objects distribution, 10b-mix-448" width="500">
+  <img src="images/n_objects_dist_pt.png" alt="Number of objects distribution, 10b-pt-448" width="500">
 </div>
 
 - `mix` models appear to be more verbose than `pt`
@@ -89,11 +89,11 @@ Model is usually pretty sure about the predicted classes as the 10th quantile is
 
 ### Input Image Resolution
 
-![input resolution table](../assets/images/input_resolution_table.png)
+![input resolution table](images/input_resolution_table.png)
 
 <div style="display: flex;">
-  <img src="../assets/images/resolution_sizes_distr_1.png" alt="classes_per_call=1" width="500">
-  <img src="../assets/images/resolution_sizes_distr_4.png" alt="classes_per_call=4" width="500">
+  <img src="images/resolution_sizes_distr_1.png" alt="classes_per_call=1" width="500">
+  <img src="images/resolution_sizes_distr_4.png" alt="classes_per_call=4" width="500">
 </div>
 
 - As `classes_per_call` approaches 8, the `10b-pt-224` produces too many false positives (especially smaller objects), which degrades the metric
@@ -104,7 +104,7 @@ a certain type is significant, models tend to output the whole image as bounding
 
 ### Model Size
 
-![model size table](../assets/images/model_size_table.png)
+![model size table](images/model_size_table.png)
 
 - `28B-pt-448` model performs poorly on object detection task
   - According to the [Paligemma-2 paper](https://arxiv.org/pdf/2412.03555), "a possible factor related to the relatively worse transferability of PaliGemma 2 28B is that the underlying Gemma 2 27B model is trained from scratch, as opposed to the 2B and 9B models, which are distilled"
