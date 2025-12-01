@@ -1,4 +1,3 @@
-
 ## Open Class vs Closed-Set Object Detection
 
 Open class detection models can identify objects from both known and novel/unseen classes, adapting to new object categories dynamically, while closed-set detection models are limited to a fixed set of predefined classes they were trained on and cannot recognize objects outside this set.
@@ -19,13 +18,13 @@ Paligemma-2 is a family of vision-language models released by Google in 2024.
 These models can be evaluated on more than 30 tasks, including image captioning and visual question answering (VQA).
 Object detection is also among the suite of tasks that Paligemma-2 is designed to perform.
 
-Paligemma-2 flexibility stems from the fact that a vision-language model may be flexibly prompted by means of natural language. 
+Paligemma-2's flexibility stems from the fact that a vision-language model may be flexibly prompted by means of natural language. 
 Some of Paligemma-2 family models were trained specifically to solve the open class detection task, allowing user-driven detection via natural language prompts.
 
 This work focuses on:
 
-- implementation of an evaluation framework allowing to benchmark Paligemma-2 models on COCO val2017
-- fine-tuning of Paligemma-2 models on COCO train2017 as a closed-set object detection models
+- implementation of an evaluation framework allowing us to benchmark Paligemma-2 models on COCO val2017
+- fine-tuning of Paligemma-2 models on COCO train2017 as closed-set object detection models
 
 
 ### Paligemma-2 object detection mode input format
@@ -45,5 +44,5 @@ Model outputs a set of bounding boxes in the format:
 
 ## Roadmap
 
-We first need to reproduce the COCO2017 benchmark results for the well known YOLOv11 family. 
-Once a reliable and reproducible benchmark result is achieved, it can be used to evaluate any other model including one from Paligemma-2 family. 
+We first need to reproduce the COCO2017 benchmark results for the well-known YOLOv11 family. 
+Once a reliable and reproducible benchmark result is achieved, it can be used to evaluate any other model including one from the Paligemma-2 family. 

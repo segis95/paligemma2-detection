@@ -8,7 +8,7 @@ In this part we discuss an approach that allows to fine-tune Paligemma-2 models 
 Natural language typically comprises an extremely large and complex set of dependencies. In order to adequately embrace this complexity
 language models typically consist of a huge amount of parameters. 
 
-Imposing a certain structure on the model's input and output often allows to efficiently leverage its pattern recognition capabilities
+Imposing a certain structure on the model's input and output often allows us to efficiently leverage its pattern recognition capabilities
 in a partially known domain. Our approach is inspired by transfer learning examples from 
 the [Paligemma-2 paper](https://arxiv.org/pdf/2412.03555) and by [Pix2seq framework](https://arxiv.org/pdf/2109.10852). 
 
@@ -18,11 +18,11 @@ It consists of two major steps:
 
 ### \<unusedXX> tokens
 
-Adding new tokens to a pre-trained language model is not the most exciting thing to do. 
-It is extremely likely that such a surgery would break its inherent structures, dependencies to say nothing about performance degradation.
+Adding new tokens to a pre-trained language model can be problematic. 
+It is highly likely that such a surgery would break its inherent structures, dependencies not to mention performance degradation.
 
 The authors of the PaliGemma-2 model family included a set of "unused tokens" within the model’s architecture, which are reserved and integrated into the model structure,
-even though they have not yet been assigned any specific semantic meaning.
+even though they have not been assigned any specific semantic meaning.
 
 These tokens are [numbered](https://huggingface.co/google/paligemma2-10b-pt-448/blob/main/tokenizer_config.json) from 7 to 105 inclusive and take the form `<unused0>`, `<unused1>`, `<unused2>`...`<unused98>`.
 
@@ -39,7 +39,7 @@ The structure of the model's input and output is as follows:
 - Each group has the structure `<locAAAA><locBBBB><locCCCC><locDDDD><unusedXX>`, where the first 4 tokens encode the bounding box as before, 
 and the last token matches one of the 81 selected <unused> tokens above
 
-This structure uses a limited number of tokens and eliminates the diversity of natural language, simplifies dependencies, and allows fine-tuning the model for detecting a fixed set of classes
+This structure uses a limited number of tokens and eliminates the diversity of natural language, simplifies dependencies and allows for fine-tuning of the model for detecting a fixed set of classes.
 
 ### During Training
 
@@ -48,7 +48,7 @@ This structure uses a limited number of tokens and eliminates the diversity of n
 - For each object in the annotation set, a corresponding combination of the form `<locAAAA><locBBBB><locCCCC><locDDDD><unusedXX>` is constructed 
 - All such combinations for a given image are shuffled and fill N of the required 51 target combinations 
 - The remaining max(0, 51-N) combinations are padded with strings of the form `<locAAAA><locBBBB><locCCCC><locDDDD><unused80>`,
-where AAAA, BBBB, CCCC, and DDDD are chosen, when possible, so that their IoU with any of the max(0, 51-N) bounding boxes does not exceed a threshold of 0.15 
+where AAAA, BBBB, CCCC, and DDDD are chosen, when possible, so that their IoU with any of the N bounding boxes does not exceed a threshold of 0.15 
 - The 255 target tokens are appended with a final `<eos>`
 
 **Input**: `<image>detect all classes\n`
@@ -92,7 +92,7 @@ which is an improvement of more than 7 percentage points over the open-set confi
 
 ![number of detections distribution](images/cs_objnum_distr.png)
 
-- The model tends to produce redundant predictions compared to the ground truth which most likely contribute to false positives
+- The model tends to produce redundant predictions compared to the ground truth, which most likely contribute to false positives
 
 ### Detection size distribution
 

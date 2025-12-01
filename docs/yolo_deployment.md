@@ -1,6 +1,6 @@
 # Building Triton Inference Server for YOLOv11x and running COCO2017 benchmark
 
-## Export YOLOv11x to onnx
+## Export YOLOv11x to ONNX
 
 ```python
 from ultralytics import YOLO
@@ -10,11 +10,11 @@ onnx_file = model.export(format="onnx", dynamic=True)
 
 Also see ``deploy/convert_yolo_to_onnx.ipynb``
 
-## Convert onnx to TensorRT
+## Convert ONNX to TensorRT
 
 ### Download official NVIDIA tritonserver image
 
-It's important that TensorRT plan is obtained and used within the same system and TensorRT version.
+It's important that the TensorRT plan is obtained and used within the same system and TensorRT version.
 
 ```shell
 mv yolo11x.onnx /path/to/paligemma2-detection/deploy/models
@@ -24,7 +24,7 @@ docker run --gpus=1 -it -v /path/to/paligemma2-detection/deploy/models:/models n
 
 ### Launch the conversion in the downloaded container
 
-Take up to half an hour with an NVIDIA RTX3090.
+This may take up to half an hour with an NVIDIA RTX3090.
 
 ```shell
 export PATH=/usr/src/tensorrt/bin:$PATH
@@ -40,7 +40,7 @@ trtexec \
 exit
 ```
 
-## Launch the Triton
+## Launch Triton Server
 
 ```shell
 cp deploy/models/model.plan deploy/triton/yolo/1
@@ -57,13 +57,13 @@ Primary goals:
 - Compare quality of a TensorRT+Triton deploy versus original model
 
 COCO2017 data (train and val) is loaded automatically when calling ``model.val(data="coco.yaml", augment=False)``.
-See ``deploy/coco_benchmark_yolo.ipynb`` for details.
+See the notebook at ``deploy/coco_benchmark_yolo.ipynb`` for details.
 
 ### Results
 
 mAP@[IoU=0.50:0.95] is **0.546** (original weights) vs **0.536** (TensorRT+Triton).
 
-The official result for YOLOv11x is confirmed. The quality loss is of 1 percentage point. 
-It is now possible to use the benchmark similarly with Paligemma-2 models.
+The official result for YOLOv11x is confirmed. The quality loss is 1 percentage point. 
+It is now possible to benchmark Paligemma-2 models in the same way.
 
 

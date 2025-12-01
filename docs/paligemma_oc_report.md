@@ -1,13 +1,13 @@
 # Paligemma-2 Open Class Object Detection Evaluation
 
-As a naturally open class detection models, Paligemma-2 models need a special evaluation protocol for a closed-set detection benchmark like COCO2017.
+As naturally open class detection models, Paligemma-2 models need a special evaluation protocol for a closed-set detection benchmark like COCO2017.
 
 
 ## Prediction Building Protocol
 
 - classes_per_call is set to an integer between 1 and 80
-- 80 COCO classes are divided (evenly when possible) groups, each containing classes_per_call classes
-- For each group with the set of class names c_1, c_2, ... , c_{classes_per_call}, a prompt is constructed as follows:
+- 80 COCO classes are divided (evenly when possible) into groups, each containing classes_per_call classes
+- For each group with a set of class names c_1, c_2, ... , c_{classes_per_call}, a prompt is constructed as follows:
   - detect c1 ; c2 ; … ; c_{classes_per_call}\n
 - The resulting prompt is sent to the model along with the input image. The model outputs a set of bounding boxes in the format:
   `<locXXXX><locXXXX><locXXXX><locXXXX> class_string ;`
@@ -50,7 +50,7 @@ There is a number of interesting questions related to how Paligemma-2 models per
 In the present work we'll try to find answers to them.
 
 - How does the `classes_per_call` value affect the quality of detection?
-- How is the `mix` series of Paligemma-2 models compares to the `pt` series?
+- How does the `mix` series of Paligemma-2 models compare to the `pt` series?
 - How is detection quality affected by the model size?
 - How is detection quality affected by the model input resolution?
 
@@ -58,7 +58,7 @@ In all cases the `COCO2017 validation mAP@[IoU=0.50:0.95]` is used as object det
 
 ### Mix vs Pt
 
-According to [official blog](https://github.com/huggingface/blog/blob/main/paligemma2mix.md),
+According to the [official blog](https://github.com/huggingface/blog/blob/main/paligemma2mix.md),
 "pt checkpoints are meant to be fine-tuned on a downstream task and were released for that purpose",
 whereas "the mix models give a quick idea of the performance one would get when fine-tuning the pre-trained checkpoints on a downstream task".
 
@@ -73,8 +73,8 @@ whereas "the mix models give a quick idea of the performance one would get when 
   <img src="images/n_objects_dist_pt.png" alt="Number of objects distribution, 10b-pt-448" width="500">
 </div>
 
-- `mix` models appear to be more verbose than `pt`
-- interestingly the detection quality of `pt` models peaks at `classes_per_call=1` whereas for `mix` models it peaks at `classes_per_call=10`
+- `mix` models appear to be more verbose than `pt` models
+- interestingly the detection quality of `pt` models peaks at `classes_per_call=1` whereas for `mix` models, it peaks at `classes_per_call=10`
 
 ### Classes_per_call
 
@@ -108,4 +108,4 @@ a certain type is significant, models tend to output the whole image as bounding
 
 - `28B-pt-448` model performs poorly on object detection task
   - According to the [Paligemma-2 paper](https://arxiv.org/pdf/2412.03555), "a possible factor related to the relatively worse transferability of PaliGemma 2 28B is that the underlying Gemma 2 27B model is trained from scratch, as opposed to the 2B and 9B models, which are distilled"
-- In terms of open class object detection capabilities the `10b-448` model performs slightly better than the `3b-448` model
+- In terms of open class object detection capabilities, the `10b-448` model performs slightly better than the `3b-448` model

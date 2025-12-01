@@ -34,6 +34,7 @@ dependencies = [
     "ipykernel",
     "albumentations",
     "gradio>=5.49.1",
+    "fiftyone"
 ]
 
 [build-system]
