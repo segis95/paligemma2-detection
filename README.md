@@ -1,8 +1,8 @@
 # Paligemma-2 Object Detection
 
-This repository contains implementations for research work into PaliGemma-2 object detection capabilities.
+This repository contains implementations for a study of PaliGemma-2 object detection capabilities.
 
-## [Technical Report](docs/index.md)
+## [Technical Report](https://segis95.github.io/paligemma2-detection/)
 
 ## Main results
 
@@ -11,11 +11,11 @@ This repository contains implementations for research work into PaliGemma-2 obje
 - Implemented a pipeline for distributed fine-tuning of Paligemma-2 models using Ray Data and Ray Train
 - Implemented Gradio demos for YOLOv11x and Paligemma-2 models
 
-| Model                                                                                                               | COCO2017_val mAP@[IoU=0.50:0.95] |
-|---------------------------------------------------------------------------------------------------------------------|----------------------------------|
-| YOLOv11x                                                                                                            | 0.546                            |
-| Paligemma-2, open class mode (best)                                                                                 | 0.239                            |
-| Paligemma-2, closed set ([fine-tuned](https://huggingface.co/segis95/paligemma2-10b-pt-448-adapter_detection_coco)) | 0.296                            |
+| Model                                                                                                                    | COCO2017_val mAP@[IoU=0.50:0.95] |
+|--------------------------------------------------------------------------------------------------------------------------|----------------------------------|
+| YOLOv11x                                                                                                                 | 0.546                            |
+| Paligemma-2, open-class mode (best)                                                                                      | 0.239                            |
+| Paligemma-2, closed-set mode ([fine-tuned](https://huggingface.co/segis95/paligemma2-10b-pt-448-adapter_detection_coco)) | 0.296                            |
 
 ![paligemma detection example](docs/images/haystacks_demo.png)
 
@@ -28,7 +28,7 @@ This repository contains implementations for research work into PaliGemma-2 obje
 
 ## Model Evaluation
 
-Configure Accelerate (GPUs, bf16): ``accelerate config``
+Configure Accelerate (GPUs, bf16 precision): ``accelerate config``
 
 ### Open class mode
 
@@ -52,15 +52,15 @@ Configure Accelerate (GPUs, bf16): ``accelerate config``
 
 ### YOLOv11x demo
 
-1. Follow [yolo deployment instructions](docs/yolo_deployment.md)
+1. Follow [YOLO deployment instructions](docs/yolo_deployment.md)
 2. ``uv run deploy/demo_yolo.py [--url yolo_endpoint_url]``
 
 ### Paligemma-2 demo
-1. Download model from Huggingface (e.g. ``google/paligemma2-10b-pt-448`` or ``google/paligemma2-3b-pt-448``) and adapter (``https://huggingface.co/segis95/paligemma2-10b-pt-448-adapter_detection_coco``)
+1. Download model from Hugging Face (e.g. ``google/paligemma2-10b-pt-448`` or ``google/paligemma2-3b-pt-448``) and adapter (``https://huggingface.co/segis95/paligemma2-10b-pt-448-adapter_detection_coco``)
 2. ``uv run deploy/demo_paligemma.py --model_path /path/to/paligemma2-10b-pt-448 [--adapter_path /path/to/adapter]``
 
 ## Predictions and results
 
 Prediction files for some models (COCO2017_val benchmark) are located at `assets/predictions/`. 
-To get these files run `git lfs pull`.
+To get these files, run `git lfs pull`.
 The corresponding benchmark results are showcased in `assets/benchmark_results.ipynb`.
