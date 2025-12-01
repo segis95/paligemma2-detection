@@ -1,6 +1,6 @@
 # Key Findings: Object Detection Performance Analysis on COCO val2017
 
-## <a href="coco_metrics.pdf" target="_blank">COCO Benchmark Results</a>
+## <a href="https://drive.google.com/file/d/1qEfDjyb6A092W8MpG8ALrVGa8uC8odRm/view?usp=sharing" target="_blank">COCO Benchmark Results</a>
 
 ## Overall Performance Comparison
 YOLO v11x significantly outperforms all PaliGemma-2 variants on COCO val2017 (36,781 objects, 80 classes), achieving `mAP@0.5:0.95` of 0.536 compared to the best PaliGemma variant (10B-finetuned) at 0.296.
