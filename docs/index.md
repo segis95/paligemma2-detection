@@ -1,4 +1,4 @@
-# Technical Documentation
+# Technical Report
 
 Research on PaliGemma-2 object detection capabilities.
 
